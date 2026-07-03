@@ -1,0 +1,5 @@
+output/
+pretrained/
+__pycache__/
+*.MP4
+*.json
