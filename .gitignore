@@ -1,5 +1,6 @@
 output/
 pretrained/
 __pycache__/
+temp/
+*.csv
 *.MP4
-*.json

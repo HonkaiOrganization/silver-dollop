@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import cv2
+import numpy as np
+import pandas as pd
+from PySide6.QtCore import QThread, Signal
+from typing import Optional, cast
+
+from models.pose import PoseProcessor
+
+
+class PlaybackThread(QThread):
+    """
+    从 MP4 + CSV 回放相机帧与骨架帧。
+    """
+    frames_ready = Signal(object, object, int)  # (camera_bgr, skeleton_bgr, frame_idx)
+    playback_finished = Signal()
+
+    def __init__(self, video_path: str, csv_path: str, conf_thresh: float = 0.5):
+        super().__init__()
+        self.video_path = video_path
+        self.csv_path = csv_path
+        self.conf_thresh = conf_thresh
+        self.skeleton_size = (1080, 1920)  # (w, h)
+
+        self._is_running = False
+        self._paused = False
+        self._seek_to = -1
+        self._playing = False
+
+    # ------------------------------------------------------------------
+    # 控制接口
+    # ------------------------------------------------------------------
+    def play(self):
+        self._paused = False
+        self._playing = True
+
+    def pause(self):
+        self._paused = True
+
+    def seek(self, frame_idx: int):
+        self._seek_to = frame_idx
+
+    def stop(self):
+        self._is_running = False
+        self.wait(2000)
+
+    @property
+    def is_playing(self) -> bool:
+        return self._playing and not self._paused
+
+    # ------------------------------------------------------------------
+    # 线程主体
+    # ------------------------------------------------------------------
+    def run(self):
+        self._is_running = True
+
+        cap = cv2.VideoCapture(self.video_path)
+        if not cap.isOpened():
+            return
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        # 加载 CSV，按 frame_id 预建索引（避免每帧过滤 DataFrame）
+        df = pd.read_csv(self.csv_path)
+        frame_kpts = self._build_frame_index(df, total_frames)
+
+        frame_idx = 0
+        frame_interval_ms = int(1000 / fps)
+
+        while self._is_running:
+            # 处理 seek 请求
+            if self._seek_to >= 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, self._seek_to)
+                frame_idx = self._seek_to
+                self._seek_to = -1
+
+            # 暂停时休眠
+            if self._paused or not self._playing:
+                self.msleep(50)
+                continue
+
+            ret, camera_frame = cap.read()
+            if not ret:
+                self._paused = True
+                self._playing = False
+                self.playback_finished.emit()
+                continue
+
+            # 从 CSV 渲染骨架
+            skeleton_canvas = np.zeros((self.skeleton_size[1], self.skeleton_size[0], 3),
+                                      dtype=np.uint8)
+            if frame_idx < len(frame_kpts):
+                xy, conf = frame_kpts[frame_idx]
+                if xy is not None:
+                    PoseProcessor.render_skeleton(skeleton_canvas, xy, conf, self.conf_thresh)
+
+            self.frames_ready.emit(camera_frame, skeleton_canvas, frame_idx)
+            frame_idx += 1
+            self.msleep(frame_interval_ms)
+
+        cap.release()
+
+    # ------------------------------------------------------------------
+    # 内部方法
+    # ------------------------------------------------------------------
+    def _build_frame_index(self, df: pd.DataFrame, total_frames: int) -> list[tuple[Optional[np.ndarray], Optional[np.ndarray]]]:
+        """
+        将 DataFrame 按 frame_id 构建为列表，每个元素为 (xy, conf) 或 (None, None)。
+        xy: [17, 2] np.ndarray, conf: [17] np.ndarray
+        """
+        kpt_names = [
+            "nose", "L_eye", "R_eye", "L_ear", "R_ear",
+            "L_sho", "R_sho", "L_elb", "R_elb",
+            "L_wri", "R_wri", "L_hip", "R_hip",
+            "L_kne", "R_kne", "L_ank", "R_ank"
+        ]
+        x_cols = [f"{n}_x" for n in kpt_names]
+        y_cols = [f"{n}_y" for n in kpt_names]
+        c_cols = [f"{n}_conf" for n in kpt_names]
+
+        index: list[tuple[Optional[np.ndarray], Optional[np.ndarray]]] = [
+            (None, None) for _ in range(total_frames)
+        ]
+
+        if "frame_id" not in df.columns:
+            return index
+
+        grouped = df.groupby("frame_id")
+        for fid, group in grouped:
+            fid = int(cast(int, fid))
+            if fid >= total_frames:
+                continue
+
+            if "person_id" in group.columns:
+                person_ids = group["person_id"].unique()
+                best_pid = person_ids[0]
+                best_mean = -1.0
+                for pid in person_ids:
+                    m = group[group["person_id"] == pid][c_cols].mean().mean()
+                    if m > best_mean:
+                        best_mean = m
+                        best_pid = pid
+                row = group[group["person_id"] == best_pid].iloc[0]
+            else:
+                row = group.iloc[0]
+
+            x_values = np.asarray(row[x_cols].tolist(), dtype=np.float64)
+            y_values = np.asarray(row[y_cols].tolist(), dtype=np.float64)
+            xy = np.stack((x_values, y_values), axis=1)  # [17, 2]
+            conf = np.asarray(row[c_cols].tolist(), dtype=np.float64)  # [17]
+            index[fid] = (xy, conf)
+
+        return index
