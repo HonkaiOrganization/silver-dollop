@@ -88,32 +88,110 @@ def _call_vlm(messages: list[dict], api_key: str | None = None) -> str:
     last_error = f"status_code={response.status_code}" # type: ignore
     return last_error
 
+def _extract_clip_b64(
+    video_path: str,
+    start_frame: int,
+    end_frame: int,
+    resolution_h: int = 240,
+    target_fps: int = 10,
+) -> str | None:
+    """从视频中截取指定帧范围的片段，编码为 base64 MP4。"""
+    import base64 as _b64
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return None
+
+    try:
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        start_frame = max(0, start_frame)
+        end_frame = min(end_frame, total)
+        if start_frame >= end_frame:
+            return None
+
+        frame_count = end_frame - start_frame
+        if frame_count < 2:
+            return None
+
+        step = max(1, int(frame_count / (target_fps * 2.0)))
+        indices = list(range(start_frame, end_frame, step))
+        if not indices:
+            return None
+
+        # 读取第一帧获取尺寸
+        cap.set(cv2.CAP_PROP_POS_FRAMES, indices[0])
+        ret, first_frame = cap.read()
+        if not ret:
+            return None
+
+        h_orig, w_orig = first_frame.shape[:2]
+        scale = resolution_h / h_orig
+        w_out = int(w_orig * scale) // 2 * 2
+        h_out = resolution_h // 2 * 2
+
+        tmp = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        tmp.close()
+
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            writer = cv2.VideoWriter(tmp.name, fourcc, target_fps, (w_out, h_out))
+            if not writer.isOpened():
+                os.unlink(tmp.name)
+                return None
+
+            for idx in indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                resized = cv2.resize(frame, (w_out, h_out))
+                writer.write(resized)
+            writer.release()
+        finally:
+            cap.release()
+
+        if not os.path.exists(tmp.name) or os.path.getsize(tmp.name) == 0:
+            if os.path.exists(tmp.name):
+                os.unlink(tmp.name)
+            return None
+
+        with open(tmp.name, 'rb') as f:
+            clip_b64 = _b64.b64encode(f.read()).decode('ascii')
+        os.unlink(tmp.name)
+        return clip_b64
+    except Exception:
+        cap.release()
+        return None
+
+
 def analyze_windows(
     video_path: str,
     json_path: str,
     top_k: int = 3,
     api_key: str | None = None,
     max_frames: int = 8,
-) -> str:
+    clip_params: dict | None = None,
+) -> dict:
     """
     根据推理 JSON 中 window_details 的 prob_abnormal 排名，
-    截取 top-k 最有问题的窗口帧，调用 VLM 逐一分析，返回 Markdown 格式报告。
-
-    Args:
-        video_path: 原始视频文件路径
-        json_path:   JumpRopeInference 输出的 JSON 文件路径
-        top_k:       选取 prob_abnormal 最高的窗口数量
+    截取 top-k 最有问题的窗口帧，调用 VLM 逐一分析。
 
     Returns:
-        Markdown 格式的分析报告字符串
+        dict: {"markdown": str, "sections": [{"title", "prob", "start_frame", "end_frame", "analysis", "clip_b64"}, ...], "summary": str}
     """
+    if clip_params is None:
+        clip_params = {}
+
     if api_key is None:
         api_key = os.getenv('DASHSCOPE_API_KEY', None)
         print(f"[VLM] 使用环境变量 DASHSCOPE_API_KEY: {api_key}")
         if api_key is None:
-            return (
-                "VLM 分析失败：未提供 DASHSCOPE_API_KEY。"
-            )
+            return {
+                "markdown": "VLM 分析失败：未提供 DASHSCOPE_API_KEY。",
+                "sections": [],
+                "summary": "",
+            }
 
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -128,42 +206,53 @@ def analyze_windows(
                 all_windows.append(w)
 
     if not all_windows:
-        return "# VLM 分析报告\n\n未找到有效的窗口分析数据。"
+        return {
+            "markdown": "# VLM 分析报告\n\n未找到有效的窗口分析数据。",
+            "sections": [],
+            "summary": "",
+        }
 
-    # 按 prob_abnormal 降序排序，取 top_k
     all_windows.sort(key=lambda w: w['prob_abnormal'], reverse=True)
     top_windows = all_windows[:top_k]
 
-    report_sections = [
+    md_sections = [
         "# 跳绳动作 VLM 分析报告",
         "",
         f"共分析 **{len(top_windows)}** 个最异常窗口（按 `prob_abnormal` 降序选取）。",
         "",
     ]
+    sections = []
 
     for idx, w in enumerate(top_windows, 1):
         fname = w.pop('_file')
         start = w['start_frame']
         end = w['end_frame']
         prob = w['prob_abnormal']
+        title = f"问题片段 {idx} / {len(top_windows)}"
 
-        report_sections.append(f"## 问题片段 {idx} / {len(top_windows)}")
-        report_sections.append(f"- **来源文件**: `{fname}`")
-        report_sections.append(f"- **帧范围**: {start} - {end}")
-        report_sections.append(f"- **异常概率**: {prob:.4f}")
-        report_sections.append("")
+        md_sections.append(f"## {title}")
+        md_sections.append(f"- **来源文件**: `{fname}`")
+        md_sections.append(f"- **帧范围**: {start} - {end}")
+        md_sections.append(f"- **异常概率**: {prob:.4f}")
+        md_sections.append("")
 
         try:
             encoded = _slice_window_frames(video_path, start, end, max_frames=max_frames)
         except Exception as e:
-            report_sections.append(f"> ⚠️ 截取帧失败: {e}")
-            report_sections.append("")
+            md_sections.append(f"> ⚠️ 截取帧失败: {e}")
+            md_sections.append("")
             continue
 
         if not encoded:
-            report_sections.append("> ⚠️ 未提取到有效帧")
-            report_sections.append("")
+            md_sections.append("> ⚠️ 未提取到有效帧")
+            md_sections.append("")
             continue
+
+        clip_b64 = _extract_clip_b64(
+            video_path, start, end,
+            resolution_h=clip_params.get('resolution_h', 240),
+            target_fps=clip_params.get('target_fps', 10),
+        )
 
         messages = [
             {'role': 'system', 'content': [{'text': SYSTEM_PROMPT}]},
@@ -171,21 +260,34 @@ def analyze_windows(
         ]
 
         analysis = _call_vlm(messages, api_key=api_key)
-        report_sections.append(analysis)
-        report_sections.append("")
-        report_sections.append("---")
-        report_sections.append("")
+        md_sections.append(analysis)
+        md_sections.append("")
+        md_sections.append("---")
+        md_sections.append("")
 
-    # 汇总建议
-    report_sections.append("## 总结与改进优先级")
-    report_sections.append("")
-    report_sections.append(
+        sections.append({
+            "title": title,
+            "prob": prob,
+            "start_frame": start,
+            "end_frame": end,
+            "analysis": analysis,
+            "clip_b64": clip_b64,
+        })
+
+    summary_md = (
         "以上按异常概率从高到低列出了最有问题的 {k} 个片段。"
         "建议优先关注 **片段 1** 中的姿态问题，依次改进。".format(k=len(top_windows))
     )
-    report_sections.append("")
+    md_sections.append("## 总结与改进优先级")
+    md_sections.append("")
+    md_sections.append(summary_md)
+    md_sections.append("")
 
-    return "\n".join(report_sections)
+    return {
+        "markdown": "\n".join(md_sections),
+        "sections": sections,
+        "summary": summary_md,
+    }
 
 if __name__ == "__main__":
     import click
@@ -200,7 +302,7 @@ if __name__ == "__main__":
     @click.option('--output', default='vlm_report.md', type=click.Path(), help='分析结果输出文件路径')
     def main(video, json_path, top_k, max_frames, api_key, output):
         api_key = api_key or os.getenv('DASHSCOPE_API_KEY')
-        report = analyze_windows(
+        result = analyze_windows(
             video_path=video,
             json_path=json_path,
             top_k=top_k,
@@ -209,7 +311,7 @@ if __name__ == "__main__":
         )
 
         output_path = Path(output)
-        output_path.write_text(report, encoding='utf-8')
+        output_path.write_text(result["markdown"], encoding='utf-8')
         print(f'分析完成，报告已写入: {output_path}')
 
     main()

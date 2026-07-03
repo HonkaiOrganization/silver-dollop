@@ -161,8 +161,8 @@ with gr.Blocks() as app:
         if json_file is None:
             raise gr.Error("请先上传推理结果 JSON 文件")
 
-        report = analyze_windows(video, json_file, top_k=3)
-        return "分析完成", report
+        result = analyze_windows(video, json_file, top_k=3)
+        return "分析完成", result["markdown"]
 
     vlm_button.click(
         run_vlm_analysis,

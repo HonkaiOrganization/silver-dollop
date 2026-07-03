@@ -1,19 +1,23 @@
 import os
+import sys
 import uuid
+import webbrowser
 import numpy as np
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QComboBox, QSizePolicy,
-    QPushButton, QSlider, QMessageBox, QStackedWidget
+    QPushButton, QSlider, QMessageBox, QStackedWidget,
+    QMenuBar, QFileDialog,
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QAction
 
 from models.camera import CameraManager
 from models.pose import PoseProcessor
 from gui.camera_thread import CameraThread
 from gui.playback_thread import PlaybackThread
 from gui.analysis_page import AnalysisPage
+from gui.file_import_thread import FileImportThread
 
 TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp")
 
@@ -23,19 +27,24 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.camera_manager = CameraManager()
         self.pose_processor = PoseProcessor()
-        self.camera_thread = None
-        self.playback_thread = None
+        self.camera_thread: CameraThread | None = None
+        self.playback_thread: PlaybackThread | None = None
 
         self._last_camera_pixmap = None
         self._last_skeleton_pixmap = None
         self._mode = "recording"  # "recording" | "playback"
+        self._import_thread: FileImportThread | None = None
+        self._import_dialog: QWidget | None = None
+
+        # 倒计时相关
+        self._countdown_timer: QTimer | None = None
+        self._countdown_value = 0
+        self._pending_video_path = ""
+        self._pending_csv_path = ""
 
         self.init_ui()
         self.init_camera_system()
 
-    # ------------------------------------------------------------------
-    # UI 构建
-    # ------------------------------------------------------------------
     def init_ui(self):
         self.setWindowTitle("跳绳姿态录制与分析")
 
@@ -45,10 +54,27 @@ class MainWindow(QMainWindow):
         height = int(width * 9 / 16)
         self.resize(width, height)
 
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu("文件(&F)")
+        act_open = file_menu.addAction("打开视频文件(&O)…")
+        act_open.setShortcut("Ctrl+O")
+        act_open.triggered.connect(self._on_open_video_file)
+        file_menu.addSeparator()
+        act_exit = file_menu.addAction("退出(&X)")
+        act_exit.setShortcut("Ctrl+Q")
+        act_exit.triggered.connect(self.close)
+
+        help_menu = menu_bar.addMenu("帮助(&H)")
+        act_help = help_menu.addAction("查看帮助文档(&H)")
+        act_help.setShortcut("F1")
+        act_help.triggered.connect(self._on_show_help)
+        act_about = help_menu.addAction("关于(&A)")
+        act_about.triggered.connect(self._on_show_about)
+
         self._stack = QStackedWidget()
         self.setCentralWidget(self._stack)
 
-        # ── 主页（录制 / 回放）──────────────────────────────────────────
         self._main_page = QWidget()
         main_layout = QVBoxLayout(self._main_page)
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -57,7 +83,6 @@ class MainWindow(QMainWindow):
 
         self._analysis_page: AnalysisPage | None = None
 
-        # ── 录制模式控制栏 ──────────────────────────────────────────────
         self.recording_bar = QWidget()
         rec_layout = QHBoxLayout(self.recording_bar)
         rec_layout.setContentsMargins(0, 0, 0, 0)
@@ -93,7 +118,6 @@ class MainWindow(QMainWindow):
         rec_layout.addWidget(self.lbl_rec_status)
         rec_layout.addStretch()
 
-        # ── 回放模式控制栏 ──────────────────────────────────────────────
         self.playback_bar = QWidget()
         pb_layout = QHBoxLayout(self.playback_bar)
         pb_layout.setContentsMargins(0, 0, 0, 0)
@@ -119,6 +143,13 @@ class MainWindow(QMainWindow):
         self.lbl_frame_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.lbl_frame_info.setStyleSheet("color:#aaa")
 
+        self.btn_rerecord = QPushButton("⟳ 重新录制")
+        self.btn_rerecord.setStyleSheet(
+            "QPushButton{background:#c0392b;color:#fff;border-radius:4px;padding:6px 16px}"
+            "QPushButton:hover{background:#e74c3c}"
+        )
+        self.btn_rerecord.clicked.connect(self._on_rerecord)
+
         self.btn_submit = QPushButton("提交分析")
         self.btn_submit.setStyleSheet(
             "QPushButton{background:#8e44ad;color:#fff;border-radius:4px;padding:6px 20px}"
@@ -130,7 +161,9 @@ class MainWindow(QMainWindow):
         pb_layout.addSpacing(10)
         pb_layout.addWidget(self.slider_progress, 1)
         pb_layout.addWidget(self.lbl_frame_info)
-        pb_layout.addSpacing(20)
+        pb_layout.addSpacing(12)
+        pb_layout.addWidget(self.btn_rerecord)
+        pb_layout.addSpacing(8)
         pb_layout.addWidget(self.btn_submit)
 
         self.playback_bar.hide()
@@ -176,9 +209,25 @@ class MainWindow(QMainWindow):
         views_layout.addWidget(left_container, 1)
         views_layout.addWidget(right_container, 1)
 
+        # ── 倒计时覆盖层（叠加在视频区域中央） ─────────────────────────
+        self.lbl_countdown = QLabel("")
+        self.lbl_countdown.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_countdown.setStyleSheet(
+            "color: #e74c3c; font-size: 120px; font-weight: bold;"
+            "background: rgba(0,0,0,150); border-radius: 20px;"
+        )
+        self.lbl_countdown.setFixedSize(200, 200)
+        self.lbl_countdown.hide()
+
+        # 用一个容器把 views_layout 和倒计时标签叠在一起
+        views_container = QWidget()
+        views_stack = QVBoxLayout(views_container)
+        views_stack.setContentsMargins(0, 0, 0, 0)
+        views_stack.addLayout(views_layout, 1)
+
         main_layout.addWidget(self.recording_bar)
         main_layout.addWidget(self.playback_bar)
-        main_layout.addLayout(views_layout, 1)
+        main_layout.addWidget(views_container, 1)
 
     # ------------------------------------------------------------------
     # 摄像机初始化
@@ -208,9 +257,6 @@ class MainWindow(QMainWindow):
         if cam_id is not None:
             self.camera_manager.open_camera(cam_id)
 
-    # ------------------------------------------------------------------
-    # 实时帧显示
-    # ------------------------------------------------------------------
     def _on_live_frames(self, camera_bgr: np.ndarray, skeleton_bgr: np.ndarray):
         self._update_pixmap(self.camera_view, camera_bgr, attr="_last_camera_pixmap")
         self._update_pixmap(self.skeleton_view, skeleton_bgr, attr="_last_skeleton_pixmap")
@@ -227,23 +273,49 @@ class MainWindow(QMainWindow):
             Qt.TransformationMode.SmoothTransformation
         ))
 
-    # ------------------------------------------------------------------
-    # 录制控制
-    # ------------------------------------------------------------------
     def _on_start_recording(self):
         if self.camera_thread is None:
             return
         os.makedirs(TEMP_DIR, exist_ok=True)
         uid = uuid.uuid4().hex[:8]
-        video_path = os.path.join(TEMP_DIR, f"rec_{uid}.mp4")
-        csv_path = os.path.join(TEMP_DIR, f"rec_{uid}.csv")
+        self._pending_video_path = os.path.join(TEMP_DIR, f"rec_{uid}.mp4")
+        self._pending_csv_path = os.path.join(TEMP_DIR, f"rec_{uid}.csv")
 
-        self.camera_thread.start_recording(video_path, csv_path, fps=30.0)
-
+        # 禁用按钮，启动 3 秒倒计时
         self.btn_start_rec.setEnabled(False)
-        self.btn_stop_rec.setEnabled(True)
+        self.btn_stop_rec.setEnabled(False)
         self.camera_selector.setEnabled(False)
-        self.lbl_rec_status.setText("录制中 0.0s …")
+        self.lbl_rec_status.setText("准备录制…")
+
+        self._countdown_value = 3
+        self.lbl_countdown.setText("3")
+        self.lbl_countdown.show()
+
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(1000)
+        self._countdown_timer.timeout.connect(self._on_countdown_tick)
+        self._countdown_timer.start()
+
+    def _on_countdown_tick(self):
+        self._countdown_value -= 1
+        if self._countdown_value > 0:
+            self.lbl_countdown.setText(str(self._countdown_value))
+            self.lbl_rec_status.setText(f"准备录制… {self._countdown_value}")
+        else:
+            # 倒计时结束，隐藏倒计时标签，开始正式录制
+            if self._countdown_timer is None:
+                return
+            self._countdown_timer.stop()
+            self._countdown_timer = None
+            self.lbl_countdown.hide()
+
+            if self.camera_thread is None:
+                return
+            self.camera_thread.start_recording(
+                self._pending_video_path, self._pending_csv_path, fps=30.0
+            )
+            self.btn_stop_rec.setEnabled(True)
+            self.lbl_rec_status.setText("录制中 0.0s …")
 
     def _on_stop_recording(self):
         if self.camera_thread is None:
@@ -267,9 +339,6 @@ class MainWindow(QMainWindow):
                             total_frames: int, fps: float):
         self._switch_to_playback(video_path, csv_path, total_frames, fps)
 
-    # ------------------------------------------------------------------
-    # 模式切换
-    # ------------------------------------------------------------------
     def _switch_to_playback(self, video_path: str, csv_path: str,
                              total_frames: int, fps: float):
         self._mode = "playback"
@@ -278,7 +347,6 @@ class MainWindow(QMainWindow):
         self._playback_total_frames = total_frames
         self._playback_fps = fps
 
-        # 隐藏录制控件，显示回放控件
         self.recording_bar.hide()
         self.playback_bar.show()
 
@@ -286,13 +354,11 @@ class MainWindow(QMainWindow):
         self.slider_progress.setValue(0)
         self.lbl_frame_info.setText(f"0 / {total_frames}")
 
-        # 停止实时摄像机线程
         if self.camera_thread:
             self.camera_thread.stop()
             self.camera_thread = None
         self.camera_manager.close_camera()
 
-        # 启动回放线程
         self.playback_thread = PlaybackThread(video_path, csv_path)
         self.playback_thread.frames_ready.connect(self._on_playback_frames)
         self.playback_thread.playback_finished.connect(self._on_playback_finished)
@@ -301,9 +367,6 @@ class MainWindow(QMainWindow):
         self.lbl_camera_title.setText("录制回放")
         self.lbl_skeleton_title.setText("骨架回放")
 
-    # ------------------------------------------------------------------
-    # 回放控制
-    # ------------------------------------------------------------------
     def _on_playback_frames(self, camera_bgr: np.ndarray, skeleton_bgr: np.ndarray,
                             frame_idx: int):
         self._update_pixmap(self.camera_view, camera_bgr, attr="_last_camera_pixmap")
@@ -340,14 +403,34 @@ class MainWindow(QMainWindow):
     def _on_slider_moved(self, value: int):
         self.lbl_frame_info.setText(f"{value} / {self._playback_total_frames}")
 
-    # ------------------------------------------------------------------
-    # 提交分析 → 切换到分析页面
-    # ------------------------------------------------------------------
+    def _on_rerecord(self):
+        if self.playback_thread:
+            self.playback_thread.stop()
+            self.playback_thread = None
+
+        self.camera_view.clear()
+        self.skeleton_view.clear()
+        self._last_camera_pixmap = None
+        self._last_skeleton_pixmap = None
+
+        self._mode = "recording"
+        self.playback_bar.hide()
+        self.recording_bar.show()
+
+        self.btn_start_rec.setEnabled(True)
+        self.btn_stop_rec.setEnabled(False)
+        self.camera_selector.setEnabled(True)
+        self.lbl_rec_status.setText("")
+
+        self.lbl_camera_title.setText("Camera Feed")
+        self.lbl_skeleton_title.setText("Pose Skeleton")
+
+        self.init_camera_system()
+
     def _on_submit_analysis(self):
         if self.playback_thread:
             self.playback_thread.pause()
 
-        # 清理旧的分析页面
         if self._analysis_page is not None:
             self._analysis_page.cleanup()
             self._stack.removeWidget(self._analysis_page)
@@ -371,9 +454,103 @@ class MainWindow(QMainWindow):
             self._analysis_page = None
         self._stack.setCurrentWidget(self._main_page)
 
-    # ------------------------------------------------------------------
-    # 事件
-    # ------------------------------------------------------------------
+    def _on_open_video_file(self):
+        if self._import_thread and self._import_thread.isRunning():
+            QMessageBox.information(self, "提示", "正在导入视频，请稍候…")
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "打开视频文件", "",
+            "视频文件 (*.mp4 *.avi *.mkv *.mov *.wmv *.flv);;所有文件 (*)"
+        )
+        if not file_path:
+            return
+
+        if self.camera_thread:
+            self.camera_thread.stop()
+            self.camera_thread = None
+        self.camera_manager.close_camera()
+
+        uid = uuid.uuid4().hex[:8]
+        video_out = os.path.join(TEMP_DIR, f"imp_{uid}.mp4")
+        csv_out = os.path.join(TEMP_DIR, f"imp_{uid}.csv")
+
+        self._import_dialog = QWidget(None, Qt.WindowType.Window
+                                      | Qt.WindowType.WindowStaysOnTopHint
+                                      | Qt.WindowType.CustomizeWindowHint
+                                      | Qt.WindowType.WindowTitleHint
+                                      | Qt.WindowType.WindowCloseButtonHint)
+        self._import_dialog.setWindowTitle("导入视频")
+        self._import_dialog.setFixedSize(280, 80)
+        dlg_layout = QVBoxLayout(self._import_dialog)
+        dlg_layout.setContentsMargins(20, 12, 20, 12)
+        lbl = QLabel("正在推理 CSV，请稍候…")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setStyleSheet("font-size:13px;")
+        dlg_layout.addWidget(lbl)
+        self._import_dialog.closeEvent = self._on_import_dialog_close
+        # 居中于主窗口
+        geo = self.geometry()
+        dw, dh = 280, 80
+        self._import_dialog.move(
+            geo.x() + (geo.width() - dw) // 2,
+            geo.y() + (geo.height() - dh) // 2,
+        )
+        self._import_dialog.show()
+
+        self._import_thread = FileImportThread(
+            file_path, video_out, csv_out, self.pose_processor
+        )
+        self._import_thread.finished.connect(self._on_import_finished)
+        self._import_thread.error.connect(self._on_import_error)
+        self._import_thread.start()
+
+    def _on_import_dialog_close(self, event):
+        if self._import_thread and self._import_thread.isRunning():
+            self._import_thread.stop()
+        self._import_thread = None
+        self._import_dialog = None
+        self.init_camera_system()
+        event.accept()
+
+    def _on_import_finished(self, video_path: str, csv_path: str,
+                             total_frames: int, fps: float):
+        dlg = self._import_dialog
+        self._import_dialog = None
+        if dlg:
+            dlg.close()
+        self._import_thread = None
+        self._switch_to_playback(video_path, csv_path, total_frames, fps)
+
+    def _on_import_error(self, msg: str):
+        dlg = self._import_dialog
+        self._import_dialog = None
+        if dlg:
+            dlg.close()
+        self._import_thread = None
+        QMessageBox.critical(self, "导入失败", f"视频导入出错:\n{msg}")
+        self.init_camera_system()
+
+    def _on_show_help(self):
+        readme_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "README.md"
+        )
+        if os.path.exists(readme_path):
+            webbrowser.open(readme_path)
+        else:
+            QMessageBox.information(
+                self, "帮助文档",
+                f"README.md 不存在于:\n{readme_path}"
+            )
+
+    def _on_show_about(self):
+        QMessageBox.about(
+            self, "关于",f"""<h2>关于软件</h2>
+<p>开发团队：<a href="https://github.com/HonkaiOrganization">Honkai Organization</a></p>
+<p>版本：1.0.0</p>
+"""
+        )
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._last_camera_pixmap:
@@ -390,10 +567,16 @@ class MainWindow(QMainWindow):
             ))
 
     def closeEvent(self, event):
+        if self._countdown_timer:
+            self._countdown_timer.stop()
         if self.camera_thread:
             self.camera_thread.stop()
         if self.playback_thread:
             self.playback_thread.stop()
+        if self._import_thread and self._import_thread.isRunning():
+            self._import_thread.stop()
+        if self._import_dialog:
+            self._import_dialog.close()
         if self._analysis_page:
             self._analysis_page.cleanup()
         self.camera_manager.close_camera()

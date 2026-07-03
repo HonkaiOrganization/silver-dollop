@@ -57,6 +57,7 @@ class CameraThread(QThread):
         self._csv_rows = []
         self._record_start_time = time.time()
         self._recording = True
+        self._stop_requested = False
 
         os.makedirs(os.path.dirname(video_path) or ".", exist_ok=True)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
@@ -88,11 +89,9 @@ class CameraThread(QThread):
             if self._recording:
                 self._record_frame(processed_camera, pose_result)
 
-            if self._stop_requested:
-                break
-
-        if self._recording:
-            self._finish_recording()
+            if self._stop_requested and self._recording:
+                self._recording = False
+                self._finish_recording()
 
     def stop(self):
         self._is_running = False

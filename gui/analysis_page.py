@@ -1,26 +1,33 @@
 import os
-import json
+import base64
+import tempfile
 import uuid
 
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import markdown
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextBrowser, QScrollArea, QSizePolicy, QProgressBar, QApplication
+    QTextBrowser, QScrollArea, QSizePolicy, QProgressBar,
+    QFrame, QSlider, QStyle,
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QUrl, QBuffer, QByteArray, QIODevice
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from core.infer import JumpRopeInference
 from core.vlm import analyze_windows
 
 TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp")
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# Worker threads
+# ═══════════════════════════════════════════════════════════════════════
 
 class InferenceWorker(QThread):
     finished = Signal(dict)
@@ -42,7 +49,7 @@ class InferenceWorker(QThread):
 
 
 class VLMWorker(QThread):
-    finished = Signal(str)
+    finished = Signal(dict)
     error = Signal(str)
 
     def __init__(self, video_path: str, json_path: str, top_k: int = 3):
@@ -53,19 +60,222 @@ class VLMWorker(QThread):
 
     def run(self):
         try:
-            report = analyze_windows(self.video_path, self.json_path, top_k=self.top_k)
-            self.finished.emit(report)
+            result = analyze_windows(
+                self.video_path, self.json_path, top_k=self.top_k,
+            )
+            self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
 
 
-def _md_to_html(md: str) -> str:
-    return markdown.markdown(
-        md,
-        extensions=["fenced_code", "tables", "sane_lists"],
-        output_format="html"
-    )
+# ═══════════════════════════════════════════════════════════════════════
+# Video player widget
+# ═══════════════════════════════════════════════════════════════════════
 
+class VideoPlayer(QWidget):
+    def __init__(self, clip_b64: str, parent=None):
+        super().__init__(parent)
+        self._tmp_file: str | None = None
+        self._setup_ui()
+        self._load_clip(clip_b64)
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self._video_widget = QVideoWidget()
+        self._video_widget.setMinimumHeight(180)
+        self._video_widget.setStyleSheet("background:#000;border-radius:6px")
+        layout.addWidget(self._video_widget, 1)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(4, 0, 4, 0)
+
+        self._btn_play = QPushButton()
+        self._btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self._btn_play.setFixedSize(32, 28)
+        self._btn_play.setStyleSheet(
+            "QPushButton{background:#333;border-radius:4px;border:none}"
+            "QPushButton:hover{background:#555}"
+        )
+        self._btn_play.clicked.connect(self._toggle_play)
+        controls.addWidget(self._btn_play)
+
+        self._slider = QSlider(Qt.Orientation.Horizontal)
+        self._slider.setRange(0, 1000)
+        self._slider.sliderMoved.connect(self._seek)
+        self._slider.setStyleSheet("""
+            QSlider::groove:horizontal {height:4px;background:#444;border-radius:2px}
+            QSlider::handle:horizontal {background:#8e44ad;width:12px;height:12px;
+                margin:-4px 0;border-radius:6px}
+            QSlider::sub-page:horizontal {background:#8e44ad;border-radius:2px}
+        """)
+        controls.addWidget(self._slider, 1)
+
+        self._lbl_time = QLabel("0:00")
+        self._lbl_time.setStyleSheet("color:#888;font-size:11px")
+        self._lbl_time.setFixedWidth(40)
+        controls.addWidget(self._lbl_time)
+
+        layout.addLayout(controls)
+
+        self._player = QMediaPlayer()
+        self._audio = QAudioOutput()
+        self._audio.setMuted(True)
+        self._player.setAudioOutput(self._audio)
+        self._player.setVideoOutput(self._video_widget)
+        self._player.positionChanged.connect(self._on_position)
+        self._player.durationChanged.connect(self._on_duration)
+
+    def _load_clip(self, clip_b64: str):
+        try:
+            data = base64.b64decode(clip_b64)
+            fd, path = tempfile.mkstemp(suffix='.mp4', dir=TEMP_DIR)
+            os.write(fd, data)
+            os.close(fd)
+            self._tmp_file = path
+            self._player.setSource(QUrl.fromLocalFile(path))
+        except Exception:
+            pass
+
+    def _toggle_play(self):
+        if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self._player.pause()
+            self._btn_play.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        else:
+            self._player.play()
+            self._btn_play.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+
+    def _seek(self, pos: int):
+        duration = self._player.duration()
+        if duration > 0:
+            self._player.setPosition(int(pos * duration / 1000))
+
+    def _on_position(self, pos: int):
+        duration = self._player.duration()
+        if duration > 0:
+            self._slider.blockSignals(True)
+            self._slider.setValue(int(pos * 1000 / duration))
+            self._slider.blockSignals(False)
+        secs = pos // 1000
+        self._lbl_time.setText(f"{secs // 60}:{secs % 60:02d}")
+
+    def _on_duration(self, duration: int):
+        self._slider.setRange(0, 1000)
+
+    def stop(self):
+        self._player.stop()
+
+    def cleanup(self):
+        self._player.stop()
+        if self._tmp_file and os.path.exists(self._tmp_file):
+            try:
+                os.unlink(self._tmp_file)
+            except OSError:
+                pass
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Section card widget
+# ═══════════════════════════════════════════════════════════════════════
+
+class SectionCard(QFrame):
+    def __init__(self, section: dict, index: int, total: int, parent=None):
+        super().__init__(parent)
+        self._video_player: VideoPlayer | None = None
+        self.setStyleSheet("""
+            SectionCard {
+                background: #252525;
+                border: 1px solid #333;
+                border-radius: 10px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        # ── Header ─────────────────────────────────────────────────────
+        header = QHBoxLayout()
+
+        title_lbl = QLabel(section["title"])
+        title_lbl.setStyleSheet(
+            "color:#eee;font-size:16px;font-weight:bold;background:transparent;border:none"
+        )
+        header.addWidget(title_lbl)
+        header.addStretch()
+
+        prob = section["prob"]
+        color = "#e74c3c" if prob > 0.7 else "#f39c12" if prob > 0.5 else "#27ae60"
+        prob_lbl = QLabel(f" 异常概率 {prob:.1%} ")
+        prob_lbl.setStyleSheet(
+            f"background:{color};color:#fff;font-size:12px;font-weight:bold;"
+            f"border-radius:10px;padding:3px 10px"
+        )
+        header.addWidget(prob_lbl)
+
+        frame_lbl = QLabel(f"帧 {section['start_frame']}-{section['end_frame']}")
+        frame_lbl.setStyleSheet("color:#888;font-size:12px;background:transparent;border:none")
+        header.addWidget(frame_lbl)
+
+        layout.addLayout(header)
+
+        # ── Progress bar ───────────────────────────────────────────────
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(int(prob * 100))
+        bar.setTextVisible(False)
+        bar.setFixedHeight(6)
+        bar.setStyleSheet(f"""
+            QProgressBar {{background:#2a2a4e;border-radius:3px;border:none}}
+            QProgressBar::chunk {{background:{color};border-radius:3px}}
+        """)
+        layout.addWidget(bar)
+
+        # ── Video player ───────────────────────────────────────────────
+        clip_b64 = section.get("clip_b64")
+        if clip_b64:
+            self._video_player = VideoPlayer(clip_b64)
+            layout.addWidget(self._video_player)
+
+        # ── Analysis text ──────────────────────────────────────────────
+        analysis_html = markdown.markdown(
+            section["analysis"],
+            extensions=["fenced_code", "tables", "sane_lists"],
+        )
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setHtml(f"""<!DOCTYPE html>
+<html><head><style>
+body {{background:transparent;color:#ddd;font-size:13px;line-height:1.7;margin:0}}
+h1,h2,h3,h4 {{color:#eee;margin-top:8px}}
+strong {{color:#f0c040}}
+ul,ol {{padding-left:20px}}
+li {{margin:3px 0}}
+code {{background:#2a2a4e;padding:1px 5px;border-radius:3px;font-size:12px}}
+pre {{background:#2a2a4e;padding:10px;border-radius:6px;overflow-x:auto}}
+hr {{border:none;border-top:1px solid #333;margin:10px 0}}
+</style></head><body>{analysis_html}</body></html>""")
+        browser.setStyleSheet(
+            "QTextBrowser{background:transparent;border:none;padding:0}"
+        )
+        browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        browser.document().setTextWidth(600)
+        doc_height = int(browser.document().size().height()) + 10
+        browser.setFixedHeight(max(doc_height, 60))
+        layout.addWidget(browser)
+
+    def cleanup(self):
+        if self._video_player:
+            self._video_player.cleanup()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Analysis page
+# ═══════════════════════════════════════════════════════════════════════
 
 class AnalysisPage(QWidget):
     back_requested = Signal()
@@ -81,6 +291,7 @@ class AnalysisPage(QWidget):
         )
         self._inference_worker: InferenceWorker | None = None
         self._vlm_worker: VLMWorker | None = None
+        self._section_cards: list[SectionCard] = []
         self._setup_ui()
 
     def _setup_ui(self):
@@ -88,6 +299,7 @@ class AnalysisPage(QWidget):
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(8)
 
+        # ── Top nav bar ────────────────────────────────────────────────
         nav_bar = QHBoxLayout()
         nav_bar.setContentsMargins(0, 0, 0, 0)
 
@@ -112,31 +324,38 @@ class AnalysisPage(QWidget):
 
         root.addLayout(nav_bar)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea{border:none}")
+        # ── Scroll area ───────────────────────────────────────────────
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setStyleSheet(
+            "QScrollArea{border:none;background:#1e1e1e}"
+        )
 
-        content = QWidget()
-        self._content_layout = QVBoxLayout(content)
+        self._content = QWidget()
+        self._content.setStyleSheet("background:#1e1e1e")
+        self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, 0, 10, 0)
         self._content_layout.setSpacing(16)
 
+        # Stats card
         self.lbl_stats = QLabel()
         self.lbl_stats.setWordWrap(True)
         self.lbl_stats.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.lbl_stats.setStyleSheet(
-            "QLabel{background:#1a1a2e;padding:16px;border-radius:8px;"
-            "color:#eee;font-size:14px}"
+            "QLabel{background:#252525;padding:16px;border-radius:8px;"
+            "border:1px solid #333;color:#eee;font-size:14px}"
         )
         self.lbl_stats.hide()
         self._content_layout.addWidget(self.lbl_stats)
 
+        # Chart container
         self._chart_container = QWidget()
         self._chart_layout = QVBoxLayout(self._chart_container)
         self._chart_layout.setContentsMargins(0, 0, 0, 0)
         self._chart_container.hide()
         self._content_layout.addWidget(self._chart_container)
 
+        # VLM bar
         vlm_bar = QHBoxLayout()
         vlm_bar.setContentsMargins(0, 0, 0, 0)
 
@@ -161,31 +380,39 @@ class AnalysisPage(QWidget):
         vlm_bar.addWidget(self.vlm_progress)
         vlm_bar.addStretch()
 
-        vlm_widget = QWidget()
-        vlm_widget.setLayout(vlm_bar)
-        vlm_widget.hide()
-        self._vlm_widget = vlm_widget
-        self._content_layout.addWidget(vlm_widget)
+        self._vlm_widget = QWidget()
+        self._vlm_widget.setLayout(vlm_bar)
+        self._vlm_widget.hide()
+        self._content_layout.addWidget(self._vlm_widget)
 
-        self.report_browser = QTextBrowser()
-        self.report_browser.setOpenExternalLinks(True)
-        self.report_browser.setStyleSheet(
-            "QTextBrowser{background:#1e1e2e;color:#eee;border:1px solid #333;"
-            "border-radius:6px;padding:12px;font-size:14px}"
+        # Section cards container
+        self._sections_container = QWidget()
+        self._sections_layout = QVBoxLayout(self._sections_container)
+        self._sections_layout.setContentsMargins(0, 0, 0, 0)
+        self._sections_layout.setSpacing(14)
+        self._sections_container.hide()
+        self._content_layout.addWidget(self._sections_container)
+
+        # Summary card (rendered after sections)
+        self._summary_browser = QTextBrowser()
+        self._summary_browser.setOpenExternalLinks(True)
+        self._summary_browser.setStyleSheet(
+            "QTextBrowser{background:#252525;color:#ddd;border:1px solid #333;"
+            "border-radius:8px;padding:12px;font-size:13px}"
         )
-        self.report_browser.hide()
-        self._content_layout.addWidget(self.report_browser)
+        self._summary_browser.hide()
+        self._content_layout.addWidget(self._summary_browser)
 
         self._content_layout.addStretch()
-        scroll.setWidget(content)
-        root.addWidget(scroll, 1)
+        self._scroll.setWidget(self._content)
+        root.addWidget(self._scroll, 1)
 
     def start_analysis(self):
-        """清空之前的结果，启动推理"""
         self.lbl_stats.hide()
         self._chart_container.hide()
         self._vlm_widget.hide()
-        self.report_browser.hide()
+        self._sections_container.hide()
+        self._summary_browser.hide()
         self.btn_vlm.setEnabled(False)
         self.lbl_vlm_status.setText("")
         self.lbl_status.setText("正在分析…")
@@ -242,16 +469,13 @@ class AnalysisPage(QWidget):
             return
 
         for i in reversed(range(self._chart_layout.count())):
-            item = self._chart_layout.itemAt(i)
-            if item is None:
-                continue
-            w = item.widget()
+            w = self._chart_layout.itemAt(i).widget() # type: ignore
             if w:
                 w.deleteLater()
 
-        fig = Figure(figsize=(8, 3.5), dpi=100, facecolor='#1a1a2e')
+        fig = Figure(figsize=(8, 3.5), dpi=100, facecolor='#252525')
         ax = fig.add_subplot(111)
-        ax.set_facecolor('#1a1a2e')
+        ax.set_facecolor('#252525')
 
         x = [d["start_frame"] for d in details]
         y = [d["prob_abnormal"] for d in details]
@@ -277,7 +501,8 @@ class AnalysisPage(QWidget):
         self.btn_vlm.setEnabled(False)
         self.lbl_vlm_status.setText("VLM 分析中…")
         self.vlm_progress.show()
-        self.report_browser.hide()
+        self._sections_container.hide()
+        self._summary_browser.hide()
 
         self._vlm_worker = VLMWorker(
             self._video_path, self._output_json, top_k=3
@@ -286,18 +511,58 @@ class AnalysisPage(QWidget):
         self._vlm_worker.error.connect(self._on_vlm_error)
         self._vlm_worker.start()
 
-    def _on_vlm_done(self, report: str):
+    def _on_vlm_done(self, result: dict):
         self.vlm_progress.hide()
         self.btn_vlm.setEnabled(True)
         self.lbl_vlm_status.setText("VLM 分析完成")
-        self.report_browser.setHtml(_md_to_html(report))
-        self.report_browser.show()
+        self._render_sections(result.get("sections", []), result.get("summary", ""))
 
     def _on_vlm_error(self, err: str):
         self.vlm_progress.hide()
         self.btn_vlm.setEnabled(True)
         self.lbl_vlm_status.setText(f"VLM 失败: {err}")
 
+    def _render_sections(self, sections: list[dict], summary: str):
+        self._clear_sections()
+
+        total = len(sections)
+        for idx, sec in enumerate(sections):
+            card = SectionCard(sec, idx + 1, total)
+            self._section_cards.append(card)
+            self._sections_layout.addWidget(card)
+
+        if sections:
+            self._sections_container.show()
+
+        if summary:
+            summary_html = markdown.markdown(
+                summary, extensions=["fenced_code", "sane_lists"]
+            )
+            self._summary_browser.setHtml(f"""<!DOCTYPE html>
+<html><head><style>
+body {{background:transparent;color:#ddd;font-size:13px;line-height:1.7;margin:0}}
+strong {{color:#f0c040}}
+</style></head><body>
+<h3 style="color:#eee;margin-top:0">📋 总结与改进优先级</h3>
+{summary_html}
+</body></html>""")
+            self._summary_browser.document().setTextWidth(600)
+            h = int(self._summary_browser.document().size().height()) + 20
+            self._summary_browser.setFixedHeight(max(h, 60))
+            self._summary_browser.show()
+
+    def _clear_sections(self):
+        for card in self._section_cards:
+            card.cleanup()
+            self._sections_layout.removeWidget(card)
+            card.deleteLater()
+        self._section_cards.clear()
+        self._sections_container.hide()
+        self._summary_browser.hide()
+
+    # ──────────────────────────────────────────────────────────────────
+    # Cleanup
+    # ──────────────────────────────────────────────────────────────────
     def cleanup(self):
         if self._inference_worker and self._inference_worker.isRunning():
             self._inference_worker.abandon()
@@ -306,3 +571,4 @@ class AnalysisPage(QWidget):
         if self._vlm_worker and self._vlm_worker.isRunning():
             self._vlm_worker.quit()
             self._vlm_worker.wait(5000)
+        self._clear_sections()
