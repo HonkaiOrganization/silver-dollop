@@ -2,15 +2,16 @@ import os
 import sys
 import uuid
 import webbrowser
+import logging
 import numpy as np
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QComboBox, QSizePolicy,
     QPushButton, QSlider, QMessageBox, QStackedWidget,
-    QMenuBar, QFileDialog,
+    QFileDialog,
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap, QAction
+from PySide6.QtGui import QImage, QPixmap
 
 from models.camera import CameraManager
 from models.pose import PoseProcessor
@@ -18,6 +19,8 @@ from gui.camera_thread import CameraThread
 from gui.playback_thread import PlaybackThread
 from gui.analysis_page import AnalysisPage
 from gui.file_import_thread import FileImportThread
+
+logger = logging.getLogger(__name__)
 
 TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp")
 
@@ -32,11 +35,10 @@ class MainWindow(QMainWindow):
 
         self._last_camera_pixmap = None
         self._last_skeleton_pixmap = None
-        self._mode = "recording"  # "recording" | "playback"
+        self._mode = "recording"
         self._import_thread: FileImportThread | None = None
         self._import_dialog: QWidget | None = None
 
-        # 倒计时相关
         self._countdown_timer: QTimer | None = None
         self._countdown_value = 0
         self._pending_video_path = ""
@@ -54,9 +56,7 @@ class MainWindow(QMainWindow):
         height = int(width * 9 / 16)
         self.resize(width, height)
 
-        menu_bar = self.menuBar()
-
-        file_menu = menu_bar.addMenu("文件(&F)")
+        file_menu = self.menuBar().addMenu("文件(&F)")
         act_open = file_menu.addAction("打开视频文件(&O)…")
         act_open.setShortcut("Ctrl+O")
         act_open.triggered.connect(self._on_open_video_file)
@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         act_exit.setShortcut("Ctrl+Q")
         act_exit.triggered.connect(self.close)
 
-        help_menu = menu_bar.addMenu("帮助(&H)")
+        help_menu = self.menuBar().addMenu("帮助(&H)")
         act_help = help_menu.addAction("查看帮助文档(&H)")
         act_help.setShortcut("F1")
         act_help.triggered.connect(self._on_show_help)
@@ -92,23 +92,13 @@ class MainWindow(QMainWindow):
         self.camera_selector.currentIndexChanged.connect(self._on_camera_switched)
 
         self.btn_start_rec = QPushButton("● 开始记录")
-        self.btn_start_rec.setStyleSheet(
-            "QPushButton{background:#c0392b;color:#fff;border-radius:4px;padding:6px 18px}"
-            "QPushButton:hover{background:#e74c3c}"
-        )
         self.btn_start_rec.clicked.connect(self._on_start_recording)
 
         self.btn_stop_rec = QPushButton("■ 结束记录")
         self.btn_stop_rec.setEnabled(False)
-        self.btn_stop_rec.setStyleSheet(
-            "QPushButton{background:#555;color:#fff;border-radius:4px;padding:6px 18px}"
-            "QPushButton:enabled{background:#2980b9}"
-            "QPushButton:enabled:hover{background:#3498db}"
-        )
         self.btn_stop_rec.clicked.connect(self._on_stop_recording)
 
         self.lbl_rec_status = QLabel("")
-        self.lbl_rec_status.setStyleSheet("color:#aaa;padding-left:12px")
 
         rec_layout.addWidget(QLabel("摄像机:"))
         rec_layout.addWidget(self.camera_selector)
@@ -124,10 +114,6 @@ class MainWindow(QMainWindow):
 
         self.btn_play_pause = QPushButton("▶ 播放")
         self.btn_play_pause.setFixedWidth(90)
-        self.btn_play_pause.setStyleSheet(
-            "QPushButton{background:#27ae60;color:#fff;border-radius:4px;padding:6px 0}"
-            "QPushButton:hover{background:#2ecc71}"
-        )
         self.btn_play_pause.clicked.connect(self._on_play_pause)
 
         self.slider_progress = QSlider(Qt.Orientation.Horizontal)
@@ -141,20 +127,11 @@ class MainWindow(QMainWindow):
         self.lbl_frame_info = QLabel("0 / 0")
         self.lbl_frame_info.setFixedWidth(110)
         self.lbl_frame_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.lbl_frame_info.setStyleSheet("color:#aaa")
 
         self.btn_rerecord = QPushButton("⟳ 重新录制")
-        self.btn_rerecord.setStyleSheet(
-            "QPushButton{background:#c0392b;color:#fff;border-radius:4px;padding:6px 16px}"
-            "QPushButton:hover{background:#e74c3c}"
-        )
         self.btn_rerecord.clicked.connect(self._on_rerecord)
 
         self.btn_submit = QPushButton("提交分析")
-        self.btn_submit.setStyleSheet(
-            "QPushButton{background:#8e44ad;color:#fff;border-radius:4px;padding:6px 20px}"
-            "QPushButton:hover{background:#9b59b6}"
-        )
         self.btn_submit.clicked.connect(self._on_submit_analysis)
 
         pb_layout.addWidget(self.btn_play_pause)
@@ -168,7 +145,6 @@ class MainWindow(QMainWindow):
 
         self.playback_bar.hide()
 
-        # ── 双路图像视图 ────────────────────────────────────────────────
         views_layout = QHBoxLayout()
         views_layout.setSpacing(10)
 
@@ -178,12 +154,11 @@ class MainWindow(QMainWindow):
 
         self.camera_view = QLabel()
         self.camera_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_view.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333;")
+        self.camera_view.setStyleSheet("background-color: black;")
         self.camera_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.camera_view.setMinimumSize(1, 1)
 
         self.lbl_camera_title = QLabel("Camera Feed")
-        self.lbl_camera_title.setStyleSheet("color: #888; padding: 4px;")
         self.lbl_camera_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         left_layout.addWidget(self.lbl_camera_title)
@@ -195,12 +170,11 @@ class MainWindow(QMainWindow):
 
         self.skeleton_view = QLabel()
         self.skeleton_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.skeleton_view.setStyleSheet("background-color: #000000; border: 1px solid #333;")
+        self.skeleton_view.setStyleSheet("background-color: black;")
         self.skeleton_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.skeleton_view.setMinimumSize(1, 1)
 
         self.lbl_skeleton_title = QLabel("Pose Skeleton")
-        self.lbl_skeleton_title.setStyleSheet("color: #888; padding: 4px;")
         self.lbl_skeleton_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         right_layout.addWidget(self.lbl_skeleton_title)
@@ -209,17 +183,15 @@ class MainWindow(QMainWindow):
         views_layout.addWidget(left_container, 1)
         views_layout.addWidget(right_container, 1)
 
-        # ── 倒计时覆盖层（叠加在视频区域中央） ─────────────────────────
         self.lbl_countdown = QLabel("")
         self.lbl_countdown.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_countdown.setStyleSheet(
-            "color: #e74c3c; font-size: 120px; font-weight: bold;"
-            "background: rgba(0,0,0,150); border-radius: 20px;"
+            "font-size: 120px; font-weight: bold;"
+            "background: rgba(0,0,0,150); color: white;"
         )
         self.lbl_countdown.setFixedSize(200, 200)
         self.lbl_countdown.hide()
 
-        # 用一个容器把 views_layout 和倒计时标签叠在一起
         views_container = QWidget()
         views_stack = QVBoxLayout(views_container)
         views_stack.setContentsMargins(0, 0, 0, 0)
@@ -229,9 +201,6 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.playback_bar)
         main_layout.addWidget(views_container, 1)
 
-    # ------------------------------------------------------------------
-    # 摄像机初始化
-    # ------------------------------------------------------------------
     def init_camera_system(self):
         cameras = self.camera_manager.get_available_cameras()
         self.camera_selector.clear()
@@ -281,7 +250,6 @@ class MainWindow(QMainWindow):
         self._pending_video_path = os.path.join(TEMP_DIR, f"rec_{uid}.mp4")
         self._pending_csv_path = os.path.join(TEMP_DIR, f"rec_{uid}.csv")
 
-        # 禁用按钮，启动 3 秒倒计时
         self.btn_start_rec.setEnabled(False)
         self.btn_stop_rec.setEnabled(False)
         self.camera_selector.setEnabled(False)
@@ -302,7 +270,6 @@ class MainWindow(QMainWindow):
             self.lbl_countdown.setText(str(self._countdown_value))
             self.lbl_rec_status.setText(f"准备录制… {self._countdown_value}")
         else:
-            # 倒计时结束，隐藏倒计时标签，开始正式录制
             if self._countdown_timer is None:
                 return
             self._countdown_timer.stop()
@@ -486,10 +453,8 @@ class MainWindow(QMainWindow):
         dlg_layout.setContentsMargins(20, 12, 20, 12)
         lbl = QLabel("正在推理 CSV，请稍候…")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setStyleSheet("font-size:13px;")
         dlg_layout.addWidget(lbl)
         self._import_dialog.closeEvent = self._on_import_dialog_close
-        # 居中于主窗口
         geo = self.geometry()
         dw, dh = 280, 80
         self._import_dialog.move(
@@ -544,12 +509,53 @@ class MainWindow(QMainWindow):
             )
 
     def _on_show_about(self):
-        QMessageBox.about(
-            self, "关于",f"""<h2>关于软件</h2>
-<p>开发团队：<a href="https://github.com/HonkaiOrganization">Honkai Organization</a></p>
-<p>版本：1.0.0</p>
-"""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QDialogButtonBox
+        from PySide6.QtCore import Qt
+        import PySide6
+        import torch
+        import cv2
+        import ultralytics
+
+        versions = [
+            ("Python", sys.version.split()[0]),
+            ("PySide6", PySide6.__version__),
+            ("PyTorch", torch.__version__),
+            ("OpenCV", cv2.__version__),
+            ("Ultralytics", ultralytics.__version__),
+        ]
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("关于")
+        dialog.setFixedSize(300, 240)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(8)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel("跳绳姿态录制与分析  v1.0.0")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        for name, ver in versions:
+            lbl = QLabel(f"{name}:  {ver}")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet("font-size: 12px;")
+            layout.addWidget(lbl)
+
+        layout.addStretch()
+
+        link = QLabel(
+            "<a href='https://github.com/HonkaiOrganization'>Honkai Organization</a>"
         )
+        link.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        link.setOpenExternalLinks(True)
+        layout.addWidget(link)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+
+        dialog.exec()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

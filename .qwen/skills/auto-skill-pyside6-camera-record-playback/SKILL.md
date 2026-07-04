@@ -1,8 +1,8 @@
 ---
 name: pyside6-camera-record-playback
-description: PySide6摄像机录制+回放+文件导入架构：CameraThread/FileImportThread增量写MP4/CSV，PlaybackThread同步回放，菜单栏（文件/帮助）
+description: PySide6摄像机录制+回放+文件导入架构：CameraThread/FileImportThread增量写MP4/CSV，PlaybackThread同步回放，菜单栏（文件/帮助），原生PySide风格
 source: auto-skill
-extracted_at: '2026-07-03T05:20:39.202Z'
+extracted_at: '2026-07-04T12:00:00.000Z'
 ---
 
 # PySide6 摄像机录制与回放架构
@@ -59,9 +59,12 @@ def _finish_recording(self):
     df.to_csv(csv_path, index=False)
 ```
 
-### CSV 格式（与 PoseExtractor 对齐）
+### CSV 格式（统一定义在 config.py）
+
+所有模块共享同一份常量定义（`config.py`），避免重复：
 
 ```python
+# config.py
 KPT_NAMES = ["nose", "L_eye", "R_eye", "L_ear", "R_ear",
              "L_sho", "R_sho", "L_elb", "R_elb",
              "L_wri", "R_wri", "L_hip", "R_hip",
@@ -71,7 +74,15 @@ CSV_COLUMNS = ["frame_id", "person_id"] + [
     f"{name}_{suffix}" for name in KPT_NAMES for suffix in ("x", "y", "conf")
 ]
 # 总计 53 列: frame_id, person_id, 17×(x, y, conf)
+
+SKELETON_LINKS = [
+    (15, 13), (13, 11), (16, 14), (14, 12), (11, 12),
+    (5, 11), (6, 12), (5, 6), (5, 7), (7, 9),
+    (6, 8), (8, 10), (0, 1), (1, 3), (0, 2), (2, 4),
+]
 ```
+
+使用方式：`from config import KPT_NAMES, CSV_COLUMNS, SKELETON_LINKS`
 
 ### 信号设计
 

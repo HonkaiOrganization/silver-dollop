@@ -1,13 +1,28 @@
 ---
 name: pyside6-analysis-page
-description: PySide6分析页架构：QStackedWidget页面切换 + QThread异步推理/VLM + matplotlib图表嵌入 + VideoPlayer卡片式VLM报告（含B64视频嵌入）
+description: PySide6分析页架构：QStackedWidget页面切换 + QThread异步推理/VLM + matplotlib图表嵌入 + VideoPlayer卡片式VLM报告（含B64视频嵌入），原生PySide风格
 source: auto-skill
-extracted_at: '2026-07-03T07:12:49.092Z'
+extracted_at: '2026-07-04T12:00:00.000Z'
 ---
 
 # PySide6 分析页面架构
 
 适用于"录制→回放→提交分析"流程中的分析阶段。回放结束后点击"提交分析"，通过 QStackedWidget 切换到分析页，自动运行推理并展示图表，再手动触发 VLM 深度分析（含视频片段嵌入的卡片式报告）。
+
+## 文件结构
+
+```
+gui/
+├── analysis_page.py          # AnalysisPage 主类（页面布局+逻辑）
+├── widgets/
+│   ├── __init__.py           # 导出 VideoPlayer, SectionCard
+│   ├── video_player.py       # VideoPlayer 内嵌视频播放器
+│   └── section_card.py       # SectionCard VLM分析卡片
+└── workers/
+    ├── __init__.py           # 导出 InferenceWorker, VLMWorker
+    ├── inference_worker.py   # 推理后台线程
+    └── vlm_worker.py         # VLM分析后台线程
+```
 
 ## 整体架构
 
@@ -133,7 +148,7 @@ def cleanup(self):
 
 ### matplotlib 图表嵌入
 
-用 `FigureCanvasQTAgg` 将 matplotlib 图表嵌入 Qt 布局。注意暗色主题适配：
+用 `FigureCanvasQTAgg` 将 matplotlib 图表嵌入 Qt 布局。使用系统默认配色（原生风格）：
 
 ```python
 matplotlib.use('Agg')  # 必须在 import pyplot 前设置
@@ -151,27 +166,22 @@ def _plot_chart(self, r: dict):
         if w:
             w.deleteLater()
 
-    fig = Figure(figsize=(8, 3.5), dpi=100, facecolor='#1a1a2e')
+    fig = Figure(figsize=(8, 3.5), dpi=100)  # 使用默认背景色
     ax = fig.add_subplot(111)
-    ax.set_facecolor('#1a1a2e')
 
     x = [d["start_frame"] for d in details]
     y = [d["prob_abnormal"] for d in details]
 
-    ax.plot(x, y, color='#e74c3c', marker='.', linewidth=1.2, markersize=4)
-    ax.fill_between(x, y, alpha=0.15, color='#e74c3c')
-    ax.set_xlabel("Frame", color='#aaa')
-    ax.set_ylabel("P(abnormal)", color='#aaa')
-    ax.set_title("逐窗口异常置信度", color='#eee', pad=10)
+    ax.plot(x, y, marker='.', linewidth=1.2, markersize=4)
+    ax.fill_between(x, y, alpha=0.15)
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("P(abnormal)")
+    ax.set_title("逐窗口异常置信度")
     ax.set_ylim(0, 1.05)
-    ax.tick_params(colors='#888')
-    ax.grid(True, alpha=0.2, color='#555')
-    for spine in ax.spines.values():
-        spine.set_color('#444')
+    ax.grid(True, alpha=0.3)
 
     fig.tight_layout()
     canvas = FigureCanvas(fig)
-    canvas.setStyleSheet("background:transparent")
     self._chart_layout.addWidget(canvas)
 ```
 
@@ -214,16 +224,19 @@ class VideoPlayer(QWidget):
 
 ## SectionCard 组件
 
-每个 VLM 分析片段渲染为独立卡片，包含：标题 + 异常概率标签 + 进度条 + VideoPlayer + Markdown 分析文本。
+每个 VLM 分析片段渲染为独立卡片，包含：标题 + 异常概率标签 + 进度条 + VideoPlayer + Markdown 分析文本。使用原生 `QFrame.StyledPanel` 风格：
 
 ```python
 class SectionCard(QFrame):
     def __init__(self, section: dict, index: int, total: int, parent=None):
         # section 结构: {title, prob, start_frame, end_frame, analysis, clip_b64}
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShadow(QFrame.Shadow.Raised)
         # ... 构建 header、进度条、VideoPlayer、QTextBrowser ...
 ```
 
-**QTextBrowser 渲染分析文本**：用 `markdown` 库转换，配合暗色主题 CSS。设置 `setTextWidth` 后获取文档高度，用 `setFixedHeight` 自适应高度（配合 `ScrollBarAlwaysOff`）。
+**QTextBrowser 渲染分析文本**：用 `markdown` 库转换后 `setHtml()`。设置 `setTextWidth` 后获取文档高度，用 `setFixedHeight` 自适应高度（配合 `ScrollBarAlwaysOff`）。
 
 ## VLM 结构化返回
 

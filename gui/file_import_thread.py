@@ -1,22 +1,15 @@
 import os
-import time
+import logging
 import cv2
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import QThread, Signal
 
+from config import CSV_COLUMNS
 from models.pose import PoseProcessor
 from gui.frame_processor import FrameProcessor
 
-KPT_NAMES = [
-    "nose", "L_eye", "R_eye", "L_ear", "R_ear",
-    "L_sho", "R_sho", "L_elb", "R_elb",
-    "L_wri", "R_wri", "L_hip", "R_hip",
-    "L_kne", "R_kne", "L_ank", "R_ank"
-]
-CSV_COLUMNS = ["frame_id", "person_id"] + [
-    f"{name}_{suffix}" for name in KPT_NAMES for suffix in ("x", "y", "conf")
-]
+logger = logging.getLogger(__name__)
 
 
 class FileImportThread(QThread):

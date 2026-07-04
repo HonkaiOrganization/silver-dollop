@@ -1,25 +1,17 @@
 import os
 import time
+import logging
 import cv2
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import QThread, Signal
 
+from config import CSV_COLUMNS
 from models.camera import CameraManager
 from models.pose import PoseProcessor
 from gui.frame_processor import FrameProcessor
 
-
-# 与 PoseExtractor 保持一致的 CSV 列定义
-KPT_NAMES = [
-    "nose", "L_eye", "R_eye", "L_ear", "R_ear",
-    "L_sho", "R_sho", "L_elb", "R_elb",
-    "L_wri", "R_wri", "L_hip", "R_hip",
-    "L_kne", "R_kne", "L_ank", "R_ank"
-]
-CSV_COLUMNS = ["frame_id", "person_id"] + [
-    f"{name}_{suffix}" for name in KPT_NAMES for suffix in ("x", "y", "conf")
-]
+logger = logging.getLogger(__name__)
 
 
 class CameraThread(QThread):
@@ -119,7 +111,7 @@ class CameraThread(QThread):
 
     def _finish_recording(self):
         """关闭文件并发送录制完成信号"""
-        print(f"[CameraThread] 录制完成，保存视频: {self._video_path}, CSV: {self._csv_path}")
+        logger.info("录制完成，保存视频: %s, CSV: %s", self._video_path, self._csv_path)
         elapsed = time.time() - self._record_start_time
 
         if self._video_writer is not None:

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import cv2
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import QThread, Signal
 from typing import Optional, cast
 
+from config import KPT_NAMES
 from models.pose import PoseProcessor
+
+logger = logging.getLogger(__name__)
 
 
 class PlaybackThread(QThread):
@@ -110,15 +114,9 @@ class PlaybackThread(QThread):
         将 DataFrame 按 frame_id 构建为列表，每个元素为 (xy, conf) 或 (None, None)。
         xy: [17, 2] np.ndarray, conf: [17] np.ndarray
         """
-        kpt_names = [
-            "nose", "L_eye", "R_eye", "L_ear", "R_ear",
-            "L_sho", "R_sho", "L_elb", "R_elb",
-            "L_wri", "R_wri", "L_hip", "R_hip",
-            "L_kne", "R_kne", "L_ank", "R_ank"
-        ]
-        x_cols = [f"{n}_x" for n in kpt_names]
-        y_cols = [f"{n}_y" for n in kpt_names]
-        c_cols = [f"{n}_conf" for n in kpt_names]
+        x_cols = [f"{n}_x" for n in KPT_NAMES]
+        y_cols = [f"{n}_y" for n in KPT_NAMES]
+        c_cols = [f"{n}_conf" for n in KPT_NAMES]
 
         index: list[tuple[Optional[np.ndarray], Optional[np.ndarray]]] = [
             (None, None) for _ in range(total_frames)

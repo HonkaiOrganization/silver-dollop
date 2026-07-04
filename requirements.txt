@@ -1,0 +1,11 @@
+PySide6>=6.5
+ultralytics>=8.0
+opencv-python>=4.8
+torch>=2.0
+numpy
+pandas
+matplotlib
+dashscope
+markdown
+requests
+click
