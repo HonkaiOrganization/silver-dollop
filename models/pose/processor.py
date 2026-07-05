@@ -116,7 +116,7 @@ class PoseProcessor:
         tx = int(vx + text_dist * math.cos(mid_ang))
         ty = int(vy + text_dist * math.sin(mid_ang))
 
-        label = f"{angle_deg:.0f}°"
+        label = f"{angle_deg:.0f}deg"
         (tw, th), baseline = cv2.getTextSize(label, font, font_scale, font_thickness)
         cv2.rectangle(canvas,
                       (tx - 4, ty - th - 4),

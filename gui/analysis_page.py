@@ -12,7 +12,8 @@ matplotlib.use('Agg')
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextBrowser, QScrollArea, QProgressBar, QFrame,
+    QTextBrowser, QScrollArea, QProgressBar, QFrame, QFileDialog,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -40,6 +41,8 @@ class AnalysisPage(QWidget):
         self._inference_worker: InferenceWorker | None = None
         self._vlm_worker: VLMWorker | None = None
         self._section_cards: list[SectionCard] = []
+        self._vlm_sections: list[dict] = []
+        self._vlm_summary: str = ""
         self._setup_ui()
 
     def _setup_ui(self):
@@ -104,6 +107,13 @@ class AnalysisPage(QWidget):
         self.vlm_progress.setRange(0, 0)
         self.vlm_progress.hide()
         vlm_bar.addWidget(self.vlm_progress)
+
+        self.btn_export = QPushButton("导出报告")
+        self.btn_export.setEnabled(False)
+        self.btn_export.clicked.connect(self._on_export_report)
+        self.btn_export.hide()
+        vlm_bar.addWidget(self.btn_export)
+
         vlm_bar.addStretch()
 
         self._vlm_widget = QWidget()
@@ -201,7 +211,7 @@ class AnalysisPage(QWidget):
         ax.fill_between(x, y, alpha=0.15)
         ax.set_xlabel("Frame")
         ax.set_ylabel("P(abnormal)")
-        ax.set_title("逐窗口异常置信度")
+        ax.set_title("Per-Window Abnormal Confidence")
         ax.set_ylim(0, 1.05)
         ax.grid(True, alpha=0.3)
 
@@ -227,8 +237,12 @@ class AnalysisPage(QWidget):
     def _on_vlm_done(self, result: dict):
         self.vlm_progress.hide()
         self.btn_vlm.setEnabled(True)
+        self.btn_export.setEnabled(True)
+        self.btn_export.show()
         self.lbl_vlm_status.setText("VLM 分析完成")
-        self._render_sections(result.get("sections", []), result.get("summary", ""))
+        self._vlm_sections = result.get("sections", [])
+        self._vlm_summary = result.get("summary", "")
+        self._render_sections(self._vlm_sections, self._vlm_summary)
 
     def _on_vlm_error(self, err: str):
         self.vlm_progress.hide()
@@ -267,6 +281,36 @@ class AnalysisPage(QWidget):
         self._section_cards.clear()
         self._sections_container.hide()
         self._summary_browser.hide()
+
+    def _on_export_report(self):
+        if not self._vlm_sections:
+            return
+
+        default_name = os.path.join(
+            os.path.dirname(self._video_path),
+            "VLM分析报告.docx"
+        )
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, "导出报告", default_name,
+            "Word 文档 (*.docx)"
+        )
+        if not output_path:
+            return
+
+        try:
+            from utils.export_report import export_vlm_report
+            csv_name = os.path.basename(self._csv_path)
+            export_vlm_report(
+                output_path=output_path,
+                sections=self._vlm_sections,
+                summary=self._vlm_summary,
+                infer_result=self._infer_result,
+                csv_name=csv_name,
+            )
+            QMessageBox.information(self, "导出成功", f"报告已保存至:\n{output_path}")
+        except Exception as e:
+            logger.exception("导出报告失败")
+            QMessageBox.critical(self, "导出失败", f"导出报告时出错:\n{e}")
 
     def cleanup(self):
         if self._inference_worker and self._inference_worker.isRunning():

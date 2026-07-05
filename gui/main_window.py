@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 import uuid
 import webbrowser
 import logging
@@ -8,7 +9,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QComboBox, QSizePolicy,
     QPushButton, QSlider, QMessageBox, QStackedWidget,
-    QFileDialog,
+    QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
@@ -19,6 +20,8 @@ from gui.camera_thread import CameraThread
 from gui.playback_thread import PlaybackThread
 from gui.analysis_page import AnalysisPage
 from gui.file_import_thread import FileImportThread
+from gui.workers.realtime_inference_thread import RealtimeInferenceThread
+from config import KPT_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +46,10 @@ class MainWindow(QMainWindow):
         self._countdown_value = 0
         self._pending_video_path = ""
         self._pending_csv_path = ""
+        self._inference_thread: RealtimeInferenceThread | None = None
 
         self.init_ui()
+        self.init_inference_thread()
         self.init_camera_system()
 
     def init_ui(self):
@@ -183,6 +188,44 @@ class MainWindow(QMainWindow):
         views_layout.addWidget(left_container, 1)
         views_layout.addWidget(right_container, 1)
 
+        # ── 关键点坐标表格 + 置信度 ─────────────────────────────────
+        kpt_panel = QWidget()
+        kpt_panel.setFixedWidth(280)
+        kpt_panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
+        kpt_panel_layout = QVBoxLayout(kpt_panel)
+        kpt_panel_layout.setContentsMargins(0, 0, 0, 0)
+        kpt_panel_layout.setSpacing(4)
+
+        self.kpt_table = QTableWidget(17, 3)
+        self.kpt_table.setHorizontalHeaderLabels(["关键点", "X", "Y"])
+        self.kpt_table.verticalHeader().setVisible(False)
+        self.kpt_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.kpt_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.kpt_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.kpt_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.kpt_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        for i, name in enumerate(KPT_NAMES):
+            item = QTableWidgetItem(name)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.kpt_table.setItem(i, 0, item)
+            self.kpt_table.setItem(i, 1, QTableWidgetItem("-"))
+            self.kpt_table.setItem(i, 2, QTableWidgetItem("-"))
+            for col in range(1, 3):
+                self.kpt_table.item(i, col).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        kpt_panel_layout.addWidget(self.kpt_table, 1)
+
+        self.lbl_confidence = QLabel("Abnormal: NaN")
+        self.lbl_confidence.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_confidence.setStyleSheet(
+            "font-size: 15px; font-weight: bold;"
+            "background: rgba(0,0,0,180); color: white;"
+            "padding: 5px 10px; border-radius: 4px;"
+        )
+        kpt_panel_layout.addWidget(self.lbl_confidence)
+
+        views_layout.addWidget(kpt_panel)
+
         self.lbl_countdown = QLabel("")
         self.lbl_countdown.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_countdown.setStyleSheet(
@@ -213,6 +256,8 @@ class MainWindow(QMainWindow):
 
         self.camera_thread = CameraThread(self.camera_manager, self.pose_processor)
         self.camera_thread.frames_ready.connect(self._on_live_frames)
+        self.camera_thread.keypoints_ready.connect(self._on_keypoints_updated)
+        self.camera_thread.keypoints_ready.connect(self._inference_thread.add_keypoints)
         self.camera_thread.recording_progress.connect(self._on_recording_progress)
         self.camera_thread.recording_saved.connect(self._on_recording_saved)
         self.camera_thread.recording_too_short.connect(self._on_recording_too_short)
@@ -220,6 +265,11 @@ class MainWindow(QMainWindow):
 
         if cameras:
             self.camera_manager.open_camera(cameras[0]["id"])
+
+    def init_inference_thread(self):
+        self._inference_thread = RealtimeInferenceThread()
+        self._inference_thread.result_ready.connect(self._on_inference_result)
+        self._inference_thread.start()
 
     def _on_camera_switched(self, index):
         cam_id = self.camera_selector.itemData(index)
@@ -229,6 +279,23 @@ class MainWindow(QMainWindow):
     def _on_live_frames(self, camera_bgr: np.ndarray, skeleton_bgr: np.ndarray):
         self._update_pixmap(self.camera_view, camera_bgr, attr="_last_camera_pixmap")
         self._update_pixmap(self.skeleton_view, skeleton_bgr, attr="_last_skeleton_pixmap")
+
+    def _on_keypoints_updated(self, xy, conf):
+        for i in range(17):
+            if xy is not None:
+                x_val = f"{xy[i, 0]:.1f}"
+                y_val = f"{xy[i, 1]:.1f}"
+            else:
+                x_val = "-"
+                y_val = "-"
+            self.kpt_table.item(i, 1).setText(x_val)
+            self.kpt_table.item(i, 2).setText(y_val)
+
+    def _on_inference_result(self, confidence: float):
+        if math.isnan(confidence):
+            self.lbl_confidence.setText("Abnormal: NaN")
+        else:
+            self.lbl_confidence.setText(f"Abnormal: {confidence:.2%}")
 
     def _update_pixmap(self, label: QLabel, bgr: np.ndarray, attr: str):
         arr = np.ascontiguousarray(bgr)
@@ -328,8 +395,13 @@ class MainWindow(QMainWindow):
 
         self.playback_thread = PlaybackThread(video_path, csv_path)
         self.playback_thread.frames_ready.connect(self._on_playback_frames)
+        self.playback_thread.keypoints_ready.connect(self._on_keypoints_updated)
+        self.playback_thread.keypoints_ready.connect(self._inference_thread.add_keypoints)
         self.playback_thread.playback_finished.connect(self._on_playback_finished)
         self.playback_thread.start()
+
+        self._inference_thread.reset()
+        self.lbl_confidence.setText("Abnormal: NaN")
 
         self.lbl_camera_title.setText("录制回放")
         self.lbl_skeleton_title.setText("骨架回放")
@@ -379,6 +451,13 @@ class MainWindow(QMainWindow):
         self.skeleton_view.clear()
         self._last_camera_pixmap = None
         self._last_skeleton_pixmap = None
+
+        for i in range(17):
+            self.kpt_table.item(i, 1).setText("-")
+            self.kpt_table.item(i, 2).setText("-")
+
+        self._inference_thread.reset()
+        self.lbl_confidence.setText("Abnormal: NaN")
 
         self._mode = "recording"
         self.playback_bar.hide()
@@ -579,6 +658,8 @@ class MainWindow(QMainWindow):
             self.camera_thread.stop()
         if self.playback_thread:
             self.playback_thread.stop()
+        if self._inference_thread:
+            self._inference_thread.stop()
         if self._import_thread and self._import_thread.isRunning():
             self._import_thread.stop()
         if self._import_dialog:

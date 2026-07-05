@@ -18,6 +18,7 @@ class PlaybackThread(QThread):
     从 MP4 + CSV 回放相机帧与骨架帧。
     """
     frames_ready = Signal(object, object, int)  # (camera_bgr, skeleton_bgr, frame_idx)
+    keypoints_ready = Signal(object, object)      # (xy [17,2], conf [17]) or (None, None)
     playback_finished = Signal()
 
     def __init__(self, video_path: str, csv_path: str, conf_thresh: float = 0.5):
@@ -99,6 +100,9 @@ class PlaybackThread(QThread):
                 xy, conf = frame_kpts[frame_idx]
                 if xy is not None:
                     PoseProcessor.render_skeleton(skeleton_canvas, xy, conf, self.conf_thresh)
+                self.keypoints_ready.emit(xy, conf)
+            else:
+                self.keypoints_ready.emit(None, None)
 
             self.frames_ready.emit(camera_frame, skeleton_canvas, frame_idx)
             frame_idx += 1

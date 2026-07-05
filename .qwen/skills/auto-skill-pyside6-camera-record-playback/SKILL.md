@@ -1,6 +1,6 @@
 ---
 name: pyside6-camera-record-playback
-description: PySide6摄像机录制+回放+文件导入架构：CameraThread/FileImportThread增量写MP4/CSV，PlaybackThread同步回放，菜单栏（文件/帮助），原生PySide风格
+description: PySide6摄像机录制+回放+文件导入架构：CameraThread/FileImportThread增量写MP4/CSV，PlaybackThread同步回放，关键点坐标表格实时显示，菜单栏（文件/帮助），原生PySide风格
 source: auto-skill
 extracted_at: '2026-07-04T12:00:00.000Z'
 ---
@@ -88,10 +88,13 @@ SKELETON_LINKS = [
 
 ```python
 frames_ready = Signal(object, object)           # (camera_bgr, skeleton_bgr) 实时预览
+keypoints_ready = Signal(object, object)        # (xy: [17,2], conf: [17]) or (None, None) — 用于实时更新坐标表格 + 推理
 recording_progress = Signal(float, float)        # (elapsed_sec, frames_written)
 recording_saved = Signal(str, str, int, float)   # (video_path, csv_path, total_frames, fps)
 recording_too_short = Signal()                   # 录制不足 10 秒
 ```
+
+`keypoints_ready` 在每帧推理后发射 `(xy, conf)`，携带置信度用于下游过滤。录制和回放共用同一 slot 更新 QTableWidget。
 
 ## PlaybackThread（回放）
 
@@ -118,6 +121,11 @@ def _build_frame_index(self, df, total_frames):
 ### 回放循环
 
 ```python
+# 信号
+frames_ready = Signal(object, object, int)  # (camera_bgr, skeleton_bgr, frame_idx)
+keypoints_ready = Signal(object, object)    # (xy: [17,2], conf: [17]) or (None, None)
+playback_finished = Signal()
+
 def run(self):
     cap = cv2.VideoCapture(self.video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -343,3 +351,69 @@ def _on_show_help(self):
 2. 停止 CameraThread，关闭摄像机
 3. 启动 PlaybackThread，连接 `frames_ready` 信号
 4. 提交分析 → 切换到 AnalysisPage（详见 `pyside6-analysis-page` skill）
+
+## 关键点坐标表格（实时 X/Y 显示）
+
+在双视图（camera + skeleton）右侧添加 QTableWidget，录制时实时显示 17 关键点坐标，回放时显示当前帧坐标。
+
+### 布局
+
+```
+┌──────────────────┬──────────────────┬────────────┐
+│  Camera Feed     │  Pose Skeleton   │ 关键点表格  │
+│  (QLabel)        │  (QLabel)        │ QTableWidget│
+│                  │                  │ 名称|X|Y   │
+│                  │                  │ 17行        │
+└──────────────────┴──────────────────┴────────────┘
+```
+
+### 表格初始化
+
+```python
+from config import KPT_NAMES
+
+self.kpt_table = QTableWidget(17, 3)
+self.kpt_table.setHorizontalHeaderLabels(["关键点", "X", "Y"])
+self.kpt_table.verticalHeader().setVisible(False)
+self.kpt_table.setFixedWidth(280)
+self.kpt_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+self.kpt_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+# 三列均分
+for col in range(3):
+    self.kpt_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+
+for i, name in enumerate(KPT_NAMES):
+    item = QTableWidgetItem(name)
+    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    self.kpt_table.setItem(i, 0, item)
+    self.kpt_table.setItem(i, 1, QTableWidgetItem("-"))
+    self.kpt_table.setItem(i, 2, QTableWidgetItem("-"))
+```
+
+### 统一更新 slot（录制 + 回放共用）
+
+CameraThread 和 PlaybackThread 都发射 `keypoints_ready` 信号，连接到同一个 slot：
+
+```python
+# 连接（init_camera_system 和 _switch_to_playback 各连一次）
+self.camera_thread.keypoints_ready.connect(self._on_keypoints_updated)
+self.playback_thread.keypoints_ready.connect(self._on_keypoints_updated)
+
+def _on_keypoints_updated(self, xy):
+    for i in range(17):
+        if xy is not None:
+            x_val = f"{xy[i, 0]:.1f}"
+            y_val = f"{xy[i, 1]:.1f}"
+        else:
+            x_val = "-"
+            y_val = "-"
+        self.kpt_table.item(i, 1).setText(x_val)
+        self.kpt_table.item(i, 2).setText(y_val)
+```
+
+切回录制模式时清空表格：
+```python
+for i in range(17):
+    self.kpt_table.item(i, 1).setText("-")
+    self.kpt_table.item(i, 2).setText("-")
+```

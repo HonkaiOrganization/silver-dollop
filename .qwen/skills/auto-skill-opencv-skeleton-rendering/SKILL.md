@@ -95,13 +95,15 @@ cv2.ellipse(canvas, vertex, (ARC_RADIUS, ARC_RADIUS),
 
 ### 文字放置（角平分线方向）
 
+> **注意**：`cv2.FONT_HERSHEY_SIMPLEX` 仅支持 ASCII 字符，`°`（U+00B0）等非 ASCII 字符会渲染为 `??`。用 `deg` 替代。
+
 ```python
 mid_ang = math.radians((start_ang + end_ang) / 2)
 text_dist = ARC_RADIUS + 22
 tx = int(vx + text_dist * math.cos(mid_ang))
 ty = int(vy + text_dist * math.sin(mid_ang))
 
-label = f"{angle_deg:.0f}°"
+label = f"{angle_deg:.0f}deg"
 (tw, th), baseline = cv2.getTextSize(label, font, font_scale, font_thickness)
 
 # 黑底背景框

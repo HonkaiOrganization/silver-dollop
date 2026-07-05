@@ -19,6 +19,7 @@ class CameraThread(QThread):
     摄像机读取与姿态推理联合线程，支持录制。
     """
     frames_ready = Signal(object, object)          # (camera_bgr, skeleton_bgr)
+    keypoints_ready = Signal(object, object)       # (xy [17,2], conf [17]) or (None, None)
     recording_progress = Signal(float, float)      # (elapsed_sec, frames_written)
     recording_saved = Signal(str, str, int, float) # (video_path, csv_path, total_frames, fps)
     recording_too_short = Signal()                 # 录制不足 10 秒
@@ -77,6 +78,11 @@ class CameraThread(QThread):
             )
 
             self.frames_ready.emit(processed_camera, pose_result["skeleton_image"])
+
+            kpts_arr = pose_result.get("keypoints_array", {})
+            xy = kpts_arr.get("xy")
+            conf = kpts_arr.get("conf")
+            self.keypoints_ready.emit(xy, conf)
 
             if self._recording:
                 self._record_frame(processed_camera, pose_result)

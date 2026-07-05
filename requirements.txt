@@ -9,3 +9,4 @@ dashscope
 markdown
 requests
 click
+python-docx

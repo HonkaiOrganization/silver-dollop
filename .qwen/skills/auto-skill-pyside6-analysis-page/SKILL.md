@@ -253,12 +253,17 @@ class SectionCard(QFrame):
             "end_frame": 184,
             "analysis": "VLM 返回的 Markdown 分析文本",
             "clip_b64": "base64 编码的 MP4 视频片段",
+            "figure_number": 1,  # 图编号，供 Word 导出和 VLM 引用
         },
         ...
     ],
     "summary": "总结文本",
 }
 ```
+
+### Word 报告导出
+
+VLM 分析完成后显示"导出报告"按钮，点击弹出文件保存对话框，调用 `utils.export_report.export_vlm_report()` 生成 .docx。需要在 `__init__` 中初始化 `self._vlm_sections: list[dict] = []` 和 `self._vlm_summary: str = ""`，在 `_on_vlm_done` 中缓存结果。详见 `auto-skill-vlm-word-export` 技能。
 
 ### _extract_clip_b64 函数
 
