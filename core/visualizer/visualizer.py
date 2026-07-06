@@ -10,21 +10,21 @@ logger = logging.getLogger(__name__)
 
 def visualize_pose(csv_path: str, output_video_path: str, width: int = 1080, height: int = 1920, fps: float = 30.0):
     """
-    将CSV姿态数据渲染为纯黑背景的骨架视频。
+    Render CSV pose data as a skeleton video with pure black background.
 
     Args:
-        csv_path: 输入CSV文件路径
-        output_video_path: 输出视频路径
-        width: 画布宽度
-        height: 画布高度
-        fps: 输出视频帧率
+        csv_path: Input CSV file path
+        output_video_path: Output video path
+        width: Canvas width
+        height: Canvas height
+        fps: Output video frame rate
 
     Yields:
-        float: 当前渲染进度 (0.0 ~ 1.0)
+        float: Current rendering progress (0.0 ~ 1.0)
     """
     df = pd.read_csv(csv_path)
     if df.empty:
-        raise ValueError("CSV数据为空")
+        raise ValueError("CSV data is empty")
 
     frame_ids = sorted(df['frame_id'].unique())
     total_frames = len(frame_ids)
@@ -33,7 +33,7 @@ def visualize_pose(csv_path: str, output_video_path: str, width: int = 1080, hei
     writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
 
     if not writer.isOpened():
-        raise ValueError(f"无法创建视频写入器: {output_video_path}")
+        raise ValueError(f"Cannot create video writer: {output_video_path}")
 
     try:
         for idx, fid in enumerate(frame_ids):

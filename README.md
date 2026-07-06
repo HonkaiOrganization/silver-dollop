@@ -1,135 +1,135 @@
-# 跳绳姿态录制与分析系统
+# Jump Rope Pose Recording & Analysis System
 
-基于 **YOLO11-pose** 的人体姿态实时捕捉与跳绳动作智能分析系统。
+Real-time human pose capture and intelligent jump rope activity analysis powered by **YOLO11-pose**.
 
-## 功能概述
+## Features
 
-| 功能 | 说明 |
-|------|------|
-| 🎥 实时录制 | 通过摄像机实时采集画面，进行人体姿态推理并录制保存 |
-| 🦴 骨架渲染 | 实时渲染 17 关键点人体骨架，带关节角度标注与分组配色 |
-| ▶ 录像回放 | 回放已录制的视频与骨架，支持暂停、进度拖拽 |
-| 📊 滑窗推理 | 基于 1D-CNN 对跳绳动作进行逐窗口异常检测 |
-| 🤖 VLM 深度分析 | 调用多模态大模型对异常片段进行视频级分析并生成报告 |
-| 📂 导入视频 | 从本地视频文件跳过录制，直接进行姿态推理与分析 |
+| Feature | Description |
+|---------|-------------|
+| Live Recording | Capture video via camera with real-time pose inference and recording |
+| Skeleton Rendering | Render 17-keypoint human skeleton with joint angle annotations and grouped coloring |
+| Playback | Replay recorded video and skeleton with pause and seek support |
+| Sliding Window Inference | 1D-CNN based per-window anomaly detection on jump rope sequences |
+| VLM Deep Analysis | Multimodal LLM analysis of anomalous segments with video-level report generation |
+| Video Import | Import local video files to skip recording and proceed directly to pose inference |
 
-## 快速开始
+## Quick Start
 
-### 环境要求
+### Prerequisites
 
 - Python 3.10+
-- CUDA 11.8+（GPU 加速，可选 CPU 模式）
+- CUDA 11.8+ (GPU acceleration; CPU mode also supported)
 
-### 安装
+### Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 启动
+### Launch
 
 ```bash
 python app.py
 ```
 
-## 使用指南
+## Usage Guide
 
-### 一、摄像机实时录制
+### 1. Camera Recording
 
-1. 启动程序后，主界面左侧显示摄像机画面，右侧显示骨架渲染
-2. 从 **摄像机** 下拉框选择可用的摄像头设备
-3. 点击 **● 开始记录** 开始录制，录制信息会实时更新
-4. 录制完成后点击 **■ 结束记录**，系统自动保存并进入回放模式
+1. After launching, the main window displays the camera feed on the left and skeleton rendering on the right
+2. Select an available camera device from the **Camera** dropdown
+3. Click **Start Recording** to begin; recording status updates in real time
+4. Click **Stop Recording** when finished; the system saves automatically and enters playback mode
 
-> **注意**：录制时长需 ≥ 10 秒，过短录制会被丢弃。
+> **Note**: Recordings must be at least 10 seconds; shorter recordings are discarded.
 
-### 二、录像回放
+### 2. Playback
 
-录制结束后自动进入回放模式：
+Playback mode starts automatically after recording:
 
-- **▶ 播放 / ⏸ 暂停**：控制回放
-- **进度滑块**：拖动跳转到任意帧
-- **⟳ 重新录制**：放弃当前录制，返回摄像机模式
-- **提交分析**：进入 AI 分析流程
+- **Play / Pause**: Control playback
+- **Progress slider**: Seek to any frame
+- **Re-record**: Discard current recording and return to camera mode
+- **Submit for Analysis**: Proceed to the AI analysis pipeline
 
-### 三、导入外部视频
+### 3. Import External Video
 
-通过菜单 **文件 → 打开视频文件**（或 `Ctrl+O`）可以导入本地视频：
+Use **File -> Open Video File** (or `Ctrl+O`) to import a local video:
 
-- 支持格式：`.mp4` `.avi` `.mkv` `.mov` `.wmv` `.flv`
-- 系统会逐帧进行姿态推理，生成骨架数据和视频
-- 导入完成后自动进入回放模式，可直接提交分析
-- 导入过程中可通过进度对话框查看进度，支持取消
+- Supported formats: `.mp4` `.avi` `.mkv` `.mov` `.wmv` `.flv`
+- The system performs frame-by-frame pose inference to generate skeleton data and video
+- After import, playback mode starts automatically; you can submit for analysis directly
+- Progress is shown in a dialog; import can be cancelled
 
-### 四、AI 分析流程
+### 4. AI Analysis Pipeline
 
-点击 **提交分析** 后进入分析页面：
+Click **Submit for Analysis** to enter the analysis page:
 
-1. **滑窗推理**：自动对关键点数据进行 1D-CNN 分类，输出判定结果（正常/异常）、置信度、概率分布等统计信息
-2. **异常概率图表**：以折线图展示逐窗口的异常置信度变化趋势
-3. **VLM 深度分析**（可选）：点击 **VLM 深度分析** 按钮，系统提取 top-3 异常窗口对应的视频片段，调用多模态大模型进行分析，生成详细的卡片式报告（含视频回放 + 文字分析）
-4. **返回**：点击左上角返回按钮回到主界面
+1. **Sliding Window Inference**: Automatically classifies keypoint data using 1D-CNN, outputting prediction (Normal/Abnormal), confidence, probability distribution, and summary statistics
+2. **Abnormal Probability Chart**: Line chart showing per-window abnormal confidence trend
+3. **VLM Deep Analysis** (optional): Click **VLM Deep Analysis** to extract the top-3 most anomalous windows, invoke a multimodal LLM for analysis, and generate detailed card-style reports (with video playback + textual analysis)
+4. **Back**: Click the top-left button to return to the main interface
 
-## 菜单栏
+## Menu Bar
 
-| 菜单 | 功能 | 快捷键 |
-|------|------|--------|
-| 文件 → 打开视频文件 | 从本地打开视频文件，跳过录制直接分析 | `Ctrl+O` |
-| 文件 → 退出 | 关闭程序 | `Ctrl+Q` |
-| 帮助 → 查看帮助文档 | 打开本 README 文档 | `F1` |
-| 帮助 → 关于 | 显示程序信息 | — |
+| Menu | Action | Shortcut |
+|------|--------|----------|
+| File -> Open Video File | Open a local video for direct analysis | `Ctrl+O` |
+| File -> Exit | Close the application | `Ctrl+Q` |
+| Help -> View Help Documentation | Open this README | `F1` |
+| Help -> About | Show application info | -- |
 
-## 项目结构
+## Project Structure
 
 ```
 sport/
-├── app.py                  # PySide6 桌面应用入口
-├── gui.py                  # Gradio WebUI 入口（旧版）
+├── app.py                  # PySide6 desktop application entry point
+├── config.py               # Global configuration and keypoint definitions
 ├── core/
-│   ├── extractor/          # 姿态关键点提取（PoseExtractor）
-│   ├── infer/              # 滑窗分类推理（JumpRopeInference）
-│   ├── visualizer/         # 骨架可视化
-│   └── vlm/                # VLM 多模态分析
+│   ├── extractor/          # Pose keypoint extraction (PoseExtractor)
+│   ├── infer/              # Sliding window classification inference (JumpRopeInference)
+│   ├── visualizer/         # Skeleton visualization
+│   └── vlm/                # VLM multimodal analysis
 ├── gui/
-│   ├── main_window.py      # 主窗口
-│   ├── analysis_page.py    # 分析页（推理 + VLM + 图表）
-│   ├── camera_thread.py    # 摄像机录制线程
-│   ├── playback_thread.py  # 回放线程
-│   ├── file_import_thread.py  # 视频文件导入线程
-│   └── frame_processor.py  # 帧裁剪（9:16）
+│   ├── main_window.py      # Main window
+│   ├── analysis_page.py    # Analysis page (inference + VLM + charts)
+│   ├── camera_thread.py    # Camera recording thread
+│   ├── playback_thread.py  # Playback thread
+│   ├── file_import_thread.py  # Video file import thread
+│   └── frame_processor.py  # Frame cropping (9:16)
 ├── models/
-│   ├── camera/             # 摄像机管理（CameraManager）
-│   └── pose/               # 姿态推理（PoseProcessor, YOLO11-pose）
-├── pretrained/             # 预训练模型文件
-├── temp/                   # 临时录制/导入文件
-├── output/                 # 输出文件
-└── utils/                  # 工具函数
+│   ├── camera/             # Camera management (CameraManager)
+│   └── pose/               # Pose inference (PoseProcessor, YOLO11-pose)
+├── pretrained/             # Pretrained model files
+├── temp/                   # Temporary recording/import files
+├── output/                 # Output files
+└── utils/                  # Utility functions
 ```
 
-## 技术栈
+## Tech Stack
 
-- **姿态估计**：YOLO11m-pose（Ultralytics）
-- **分类模型**：1D-CNN 滑窗分类器
-- **GUI 框架**：PySide6 (Qt 6)
-- **视频处理**：OpenCV
-- **数据格式**：CSV（17 关键点 × 3 通道：x, y, conf）
-- **VLM 分析**：阿里云 DashScope 多模态 API
-- **图表**：matplotlib（嵌入 Qt 界面）
+- **Pose Estimation**: YOLO11m-pose (Ultralytics)
+- **Classification Model**: 1D-CNN sliding window classifier
+- **GUI Framework**: PySide6 (Qt 6)
+- **Video Processing**: OpenCV
+- **Data Format**: CSV (17 keypoints x 3 channels: x, y, conf)
+- **VLM Analysis**: Alibaba Cloud DashScope Multimodal API
+- **Charts**: matplotlib (embedded in Qt interface)
 
-## 常见问题
+## FAQ
 
-### Q: 摄像机检测不到？
+### Q: Camera not detected?
 
-A: 确保摄像头驱动已正确安装。Windows 下使用 DirectShow 后端，可在设备管理器中确认摄像头状态。
+A: Ensure the camera driver is properly installed. On Windows, the DirectShow backend is used; check camera status in Device Manager.
 
-### Q: 推理速度慢？
+### Q: Slow inference speed?
 
-A: 确保已安装 CUDA 版本的 PyTorch，模型会自动选择 GPU 推理。CPU 模式下速度会明显降低。
+A: Ensure CUDA-enabled PyTorch is installed; the model will automatically use GPU inference. CPU mode is significantly slower.
 
-### Q: 导入视频时进度卡住？
+### Q: Import progress stuck?
 
-A: 视频越长处理时间越长。可通过进度对话框的"取消"按钮中断导入。
+A: Longer videos require more processing time. Use the Cancel button in the progress dialog to interrupt the import.
 
-### Q: VLM 分析无法使用？
+### Q: VLM analysis not working?
 
-A: VLM 分析需要配置阿里云 DashScope API 密钥，请确认环境变量或配置文件已正确设置。
+A: VLM analysis requires an Alibaba Cloud DashScope API key. Ensure the environment variable or configuration is set correctly.

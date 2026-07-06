@@ -18,7 +18,7 @@ TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp")
 
 
 def _extract_keyframes_from_b64(clip_b64: str, max_frames: int = 8) -> list[np.ndarray]:
-    """从 base64 编码的视频中均匀抽取关键帧，返回 BGR 图像列表。"""
+    """Extract evenly-spaced keyframes from base64-encoded video, returning BGR image list."""
     data = base64.b64decode(clip_b64)
     os.makedirs(TEMP_DIR, exist_ok=True)
     tmp_path = os.path.join(TEMP_DIR, f"export_clip_{uuid.uuid4().hex[:8]}.mp4")
@@ -53,7 +53,7 @@ def _extract_keyframes_from_b64(clip_b64: str, max_frames: int = 8) -> list[np.n
 
 
 def _create_mosaic(frames: list[np.ndarray], cols: int = 4, target_width: int = 1200) -> np.ndarray | None:
-    """将多帧图像拼成一张网格图。"""
+    """Compose multiple images into a grid mosaic."""
     if not frames:
         return None
 
@@ -74,7 +74,7 @@ def _create_mosaic(frames: list[np.ndarray], cols: int = 4, target_width: int = 
 
 
 def _add_markdown_text(doc, text: str, parent=None):
-    """将 Markdown 文本简单解析后添加到文档中。处理加粗、列表、标题。"""
+    """Parse Markdown text (bold, lists, headings) and append to document."""
     from docx.oxml.ns import qn
 
     for line in text.split('\n'):
@@ -98,7 +98,7 @@ def _add_markdown_text(doc, text: str, parent=None):
 
 
 def _add_rich_text(paragraph, text: str):
-    """解析 Markdown 加粗语法并添加到段落。"""
+    """Parse Markdown bold syntax and append to paragraph."""
     parts = re.split(r'(\*\*.*?\*\*)', text)
     for part in parts:
         if part.startswith('**') and part.endswith('**'):
@@ -116,14 +116,14 @@ def export_vlm_report(
     csv_name: str = "",
 ):
     """
-    将 VLM 分析结果导出为 Word 文档。
+    Export VLM analysis results to a Word document.
 
     Args:
-        output_path: 输出 .docx 文件路径
-        sections: VLM 分析段落列表，每项包含 title/prob/start_frame/end_frame/analysis/clip_b64/figure_number
-        summary: 总结文本
-        infer_result: 推理结果字典（可选，用于添加概要信息）
-        csv_name: 分析的 CSV 文件名
+        output_path: Output .docx file path
+        sections: VLM analysis section list, each containing title/prob/start_frame/end_frame/analysis/clip_b64/figure_number
+        summary: Summary text
+        infer_result: Inference result dict (optional, for adding summary info)
+        csv_name: Analyzed CSV filename
     """
     doc = Document()
 
@@ -223,4 +223,4 @@ def export_vlm_report(
         except OSError:
             pass
 
-    logger.info("报告已导出: %s", output_path)
+    logger.info("Report exported: %s", output_path)

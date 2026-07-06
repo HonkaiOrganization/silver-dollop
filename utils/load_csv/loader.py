@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 def load_and_normalize_csv(csv_path):
     """
-    读取 CSV 并提取 (x, y) 坐标，进行空间归一化。
-    返回: (Frames, 17, 2) 的 numpy 数组
+    Read CSV and extract (x, y) coordinates with spatial normalization.
+    Returns: numpy array of shape (Frames, 17, 2)
     """
     df = pd.read_csv(csv_path)
     raw_data = df.iloc[:, 2:].values
@@ -29,7 +29,7 @@ def load_and_normalize_csv(csv_path):
 
 def load_csv_directory(dir_path, label):
     """
-    加载目录下所有 CSV 文件，返回 (data_segments, labels) 元组。
+    Load all CSV files from a directory, returning (data_segments, labels) tuple.
     """
     csv_files = glob.glob(os.path.join(dir_path, '*.csv'))
     data_segments = []
@@ -45,14 +45,14 @@ def load_csv_directory(dir_path, label):
 
 def load_dataset_from_config(data_config, subset='train'):
     """
-    根据配置文件加载数据集。
+    Load dataset from configuration.
 
     Args:
-        data_config: 配置文件中的 data 部分
-        subset: 'train' 或 'test'
+        data_config: Data section from config file
+        subset: 'train' or 'test'
 
     Returns:
-        (data_segments, labels) 元组
+        (data_segments, labels) tuple
     """
     subset_config = data_config.get('subsets', {}).get(subset, {})
 

@@ -1,6 +1,5 @@
 import os
 import sys
-import math
 import uuid
 import webbrowser
 import logging
@@ -20,7 +19,6 @@ from gui.camera_thread import CameraThread
 from gui.playback_thread import PlaybackThread
 from gui.analysis_page import AnalysisPage
 from gui.file_import_thread import FileImportThread
-from gui.workers.realtime_inference_thread import RealtimeInferenceThread
 from config import KPT_NAMES
 
 logger = logging.getLogger(__name__)
@@ -46,14 +44,12 @@ class MainWindow(QMainWindow):
         self._countdown_value = 0
         self._pending_video_path = ""
         self._pending_csv_path = ""
-        self._inference_thread: RealtimeInferenceThread | None = None
 
         self.init_ui()
-        self.init_inference_thread()
         self.init_camera_system()
 
     def init_ui(self):
-        self.setWindowTitle("跳绳姿态录制与分析")
+        self.setWindowTitle("Jump Rope Pose Recording & Analysis")
 
         screen = QApplication.primaryScreen()
         screen_geometry = screen.availableGeometry()
@@ -61,20 +57,20 @@ class MainWindow(QMainWindow):
         height = int(width * 9 / 16)
         self.resize(width, height)
 
-        file_menu = self.menuBar().addMenu("文件(&F)")
-        act_open = file_menu.addAction("打开视频文件(&O)…")
+        file_menu = self.menuBar().addMenu("File(&F)")
+        act_open = file_menu.addAction("Open Video File(&O)…")
         act_open.setShortcut("Ctrl+O")
         act_open.triggered.connect(self._on_open_video_file)
         file_menu.addSeparator()
-        act_exit = file_menu.addAction("退出(&X)")
+        act_exit = file_menu.addAction("Exit(&X)")
         act_exit.setShortcut("Ctrl+Q")
         act_exit.triggered.connect(self.close)
 
-        help_menu = self.menuBar().addMenu("帮助(&H)")
-        act_help = help_menu.addAction("查看帮助文档(&H)")
+        help_menu = self.menuBar().addMenu("Help(&H)")
+        act_help = help_menu.addAction("View Help Documentation(&H)")
         act_help.setShortcut("F1")
         act_help.triggered.connect(self._on_show_help)
-        act_about = help_menu.addAction("关于(&A)")
+        act_about = help_menu.addAction("About(&A)")
         act_about.triggered.connect(self._on_show_about)
 
         self._stack = QStackedWidget()
@@ -96,16 +92,16 @@ class MainWindow(QMainWindow):
         self.camera_selector.setMinimumWidth(150)
         self.camera_selector.currentIndexChanged.connect(self._on_camera_switched)
 
-        self.btn_start_rec = QPushButton("● 开始记录")
+        self.btn_start_rec = QPushButton("Start Recording")
         self.btn_start_rec.clicked.connect(self._on_start_recording)
 
-        self.btn_stop_rec = QPushButton("■ 结束记录")
+        self.btn_stop_rec = QPushButton("Stop Recording")
         self.btn_stop_rec.setEnabled(False)
         self.btn_stop_rec.clicked.connect(self._on_stop_recording)
 
         self.lbl_rec_status = QLabel("")
 
-        rec_layout.addWidget(QLabel("摄像机:"))
+        rec_layout.addWidget(QLabel("Camera:"))
         rec_layout.addWidget(self.camera_selector)
         rec_layout.addSpacing(20)
         rec_layout.addWidget(self.btn_start_rec)
@@ -117,7 +113,7 @@ class MainWindow(QMainWindow):
         pb_layout = QHBoxLayout(self.playback_bar)
         pb_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.btn_play_pause = QPushButton("▶ 播放")
+        self.btn_play_pause = QPushButton("Play")
         self.btn_play_pause.setFixedWidth(90)
         self.btn_play_pause.clicked.connect(self._on_play_pause)
 
@@ -133,10 +129,10 @@ class MainWindow(QMainWindow):
         self.lbl_frame_info.setFixedWidth(110)
         self.lbl_frame_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self.btn_rerecord = QPushButton("⟳ 重新录制")
+        self.btn_rerecord = QPushButton("Re-record")
         self.btn_rerecord.clicked.connect(self._on_rerecord)
 
-        self.btn_submit = QPushButton("提交分析")
+        self.btn_submit = QPushButton("Submit for Analysis")
         self.btn_submit.clicked.connect(self._on_submit_analysis)
 
         pb_layout.addWidget(self.btn_play_pause)
@@ -188,7 +184,7 @@ class MainWindow(QMainWindow):
         views_layout.addWidget(left_container, 1)
         views_layout.addWidget(right_container, 1)
 
-        # ── 关键点坐标表格 + 置信度 ─────────────────────────────────
+        # -- Keypoint coordinate table + confidence --------------------------------
         kpt_panel = QWidget()
         kpt_panel.setFixedWidth(280)
         kpt_panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
@@ -197,7 +193,7 @@ class MainWindow(QMainWindow):
         kpt_panel_layout.setSpacing(4)
 
         self.kpt_table = QTableWidget(17, 3)
-        self.kpt_table.setHorizontalHeaderLabels(["关键点", "X", "Y"])
+        self.kpt_table.setHorizontalHeaderLabels(["Keypoint", "X", "Y"])
         self.kpt_table.verticalHeader().setVisible(False)
         self.kpt_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.kpt_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
@@ -214,15 +210,6 @@ class MainWindow(QMainWindow):
                 self.kpt_table.item(i, col).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         kpt_panel_layout.addWidget(self.kpt_table, 1)
-
-        self.lbl_confidence = QLabel("Abnormal: NaN")
-        self.lbl_confidence.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_confidence.setStyleSheet(
-            "font-size: 15px; font-weight: bold;"
-            "background: rgba(0,0,0,180); color: white;"
-            "padding: 5px 10px; border-radius: 4px;"
-        )
-        kpt_panel_layout.addWidget(self.lbl_confidence)
 
         views_layout.addWidget(kpt_panel)
 
@@ -249,7 +236,7 @@ class MainWindow(QMainWindow):
         self.camera_selector.clear()
 
         if not cameras:
-            self.camera_selector.addItem("未检测到摄像机", None)
+            self.camera_selector.addItem("No camera detected", None)
         else:
             for cam in cameras:
                 self.camera_selector.addItem(cam["name"], cam["id"])
@@ -257,7 +244,6 @@ class MainWindow(QMainWindow):
         self.camera_thread = CameraThread(self.camera_manager, self.pose_processor)
         self.camera_thread.frames_ready.connect(self._on_live_frames)
         self.camera_thread.keypoints_ready.connect(self._on_keypoints_updated)
-        self.camera_thread.keypoints_ready.connect(self._inference_thread.add_keypoints)
         self.camera_thread.recording_progress.connect(self._on_recording_progress)
         self.camera_thread.recording_saved.connect(self._on_recording_saved)
         self.camera_thread.recording_too_short.connect(self._on_recording_too_short)
@@ -265,11 +251,6 @@ class MainWindow(QMainWindow):
 
         if cameras:
             self.camera_manager.open_camera(cameras[0]["id"])
-
-    def init_inference_thread(self):
-        self._inference_thread = RealtimeInferenceThread()
-        self._inference_thread.result_ready.connect(self._on_inference_result)
-        self._inference_thread.start()
 
     def _on_camera_switched(self, index):
         cam_id = self.camera_selector.itemData(index)
@@ -290,12 +271,6 @@ class MainWindow(QMainWindow):
                 y_val = "-"
             self.kpt_table.item(i, 1).setText(x_val)
             self.kpt_table.item(i, 2).setText(y_val)
-
-    def _on_inference_result(self, confidence: float):
-        if math.isnan(confidence):
-            self.lbl_confidence.setText("Abnormal: NaN")
-        else:
-            self.lbl_confidence.setText(f"Abnormal: {confidence:.2%}")
 
     def _update_pixmap(self, label: QLabel, bgr: np.ndarray, attr: str):
         arr = np.ascontiguousarray(bgr)
@@ -320,7 +295,7 @@ class MainWindow(QMainWindow):
         self.btn_start_rec.setEnabled(False)
         self.btn_stop_rec.setEnabled(False)
         self.camera_selector.setEnabled(False)
-        self.lbl_rec_status.setText("准备录制…")
+        self.lbl_rec_status.setText("Preparing to record…")
 
         self._countdown_value = 3
         self.lbl_countdown.setText("3")
@@ -335,7 +310,7 @@ class MainWindow(QMainWindow):
         self._countdown_value -= 1
         if self._countdown_value > 0:
             self.lbl_countdown.setText(str(self._countdown_value))
-            self.lbl_rec_status.setText(f"准备录制… {self._countdown_value}")
+            self.lbl_rec_status.setText(f"Preparing to record… {self._countdown_value}")
         else:
             if self._countdown_timer is None:
                 return
@@ -349,21 +324,21 @@ class MainWindow(QMainWindow):
                 self._pending_video_path, self._pending_csv_path, fps=30.0
             )
             self.btn_stop_rec.setEnabled(True)
-            self.lbl_rec_status.setText("录制中 0.0s …")
+            self.lbl_rec_status.setText("Recording 0.0s …")
 
     def _on_stop_recording(self):
         if self.camera_thread is None:
             return
         self.btn_stop_rec.setEnabled(False)
-        self.lbl_rec_status.setText("正在保存…")
+        self.lbl_rec_status.setText("Saving…")
         self.camera_thread.stop_recording()
 
     def _on_recording_progress(self, elapsed_sec: float, frames: float):
-        self.lbl_rec_status.setText(f"录制中 {elapsed_sec:.1f}s  |  {int(frames)} 帧")
+        self.lbl_rec_status.setText(f"Recording {elapsed_sec:.1f}s  |  {int(frames)} frames")
 
     def _on_recording_too_short(self):
-        QMessageBox.warning(self, "录制过短",
-                            "录制时间不足 10 秒，已丢弃。\n请重新录制。")
+        QMessageBox.warning(self, "Recording Too Short",
+                            "Recording duration is less than 10 seconds, discarded.\nPlease record again.")
         self.btn_start_rec.setEnabled(True)
         self.btn_stop_rec.setEnabled(False)
         self.camera_selector.setEnabled(True)
@@ -396,15 +371,11 @@ class MainWindow(QMainWindow):
         self.playback_thread = PlaybackThread(video_path, csv_path)
         self.playback_thread.frames_ready.connect(self._on_playback_frames)
         self.playback_thread.keypoints_ready.connect(self._on_keypoints_updated)
-        self.playback_thread.keypoints_ready.connect(self._inference_thread.add_keypoints)
         self.playback_thread.playback_finished.connect(self._on_playback_finished)
         self.playback_thread.start()
 
-        self._inference_thread.reset()
-        self.lbl_confidence.setText("Abnormal: NaN")
-
-        self.lbl_camera_title.setText("录制回放")
-        self.lbl_skeleton_title.setText("骨架回放")
+        self.lbl_camera_title.setText("Playback")
+        self.lbl_skeleton_title.setText("Skeleton Playback")
 
     def _on_playback_frames(self, camera_bgr: np.ndarray, skeleton_bgr: np.ndarray,
                             frame_idx: int):
@@ -419,17 +390,17 @@ class MainWindow(QMainWindow):
         )
 
     def _on_playback_finished(self):
-        self.btn_play_pause.setText("▶ 播放")
+        self.btn_play_pause.setText("Play")
 
     def _on_play_pause(self):
         if self.playback_thread is None:
             return
         if self.playback_thread.is_playing:
             self.playback_thread.pause()
-            self.btn_play_pause.setText("▶ 播放")
+            self.btn_play_pause.setText("Play")
         else:
             self.playback_thread.play()
-            self.btn_play_pause.setText("⏸ 暂停")
+            self.btn_play_pause.setText("Pause")
 
     def _on_slider_pressed(self):
         self._slider_dragging = True
@@ -455,9 +426,6 @@ class MainWindow(QMainWindow):
         for i in range(17):
             self.kpt_table.item(i, 1).setText("-")
             self.kpt_table.item(i, 2).setText("-")
-
-        self._inference_thread.reset()
-        self.lbl_confidence.setText("Abnormal: NaN")
 
         self._mode = "recording"
         self.playback_bar.hide()
@@ -502,12 +470,12 @@ class MainWindow(QMainWindow):
 
     def _on_open_video_file(self):
         if self._import_thread and self._import_thread.isRunning():
-            QMessageBox.information(self, "提示", "正在导入视频，请稍候…")
+            QMessageBox.information(self, "Info", "Importing video, please wait…")
             return
 
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "打开视频文件", "",
-            "视频文件 (*.mp4 *.avi *.mkv *.mov *.wmv *.flv);;所有文件 (*)"
+            self, "Open Video File", "",
+            "Video Files (*.mp4 *.avi *.mkv *.mov *.wmv *.flv);;All Files (*)"
         )
         if not file_path:
             return
@@ -526,11 +494,11 @@ class MainWindow(QMainWindow):
                                       | Qt.WindowType.CustomizeWindowHint
                                       | Qt.WindowType.WindowTitleHint
                                       | Qt.WindowType.WindowCloseButtonHint)
-        self._import_dialog.setWindowTitle("导入视频")
+        self._import_dialog.setWindowTitle("Import Video")
         self._import_dialog.setFixedSize(280, 80)
         dlg_layout = QVBoxLayout(self._import_dialog)
         dlg_layout.setContentsMargins(20, 12, 20, 12)
-        lbl = QLabel("正在推理 CSV，请稍候…")
+        lbl = QLabel("Processing CSV, please wait…")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dlg_layout.addWidget(lbl)
         self._import_dialog.closeEvent = self._on_import_dialog_close
@@ -572,7 +540,7 @@ class MainWindow(QMainWindow):
         if dlg:
             dlg.close()
         self._import_thread = None
-        QMessageBox.critical(self, "导入失败", f"视频导入出错:\n{msg}")
+        QMessageBox.critical(self, "Import Failed", f"Video import error:\n{msg}")
         self.init_camera_system()
 
     def _on_show_help(self):
@@ -583,8 +551,8 @@ class MainWindow(QMainWindow):
             webbrowser.open(readme_path)
         else:
             QMessageBox.information(
-                self, "帮助文档",
-                f"README.md 不存在于:\n{readme_path}"
+                self, "Help Documentation",
+                f"README.md not found at:\n{readme_path}"
             )
 
     def _on_show_about(self):
@@ -604,14 +572,14 @@ class MainWindow(QMainWindow):
         ]
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("关于")
+        dialog.setWindowTitle("About")
         dialog.setFixedSize(300, 240)
 
         layout = QVBoxLayout(dialog)
         layout.setSpacing(8)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        title = QLabel("跳绳姿态录制与分析  v1.0.0")
+        title = QLabel("Jump Rope Pose Recording & Analysis  v1.0.0")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
@@ -658,8 +626,6 @@ class MainWindow(QMainWindow):
             self.camera_thread.stop()
         if self.playback_thread:
             self.playback_thread.stop()
-        if self._inference_thread:
-            self._inference_thread.stop()
         if self._import_thread and self._import_thread.isRunning():
             self._import_thread.stop()
         if self._import_dialog:

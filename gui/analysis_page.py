@@ -53,7 +53,7 @@ class AnalysisPage(QWidget):
         nav_bar = QHBoxLayout()
         nav_bar.setContentsMargins(0, 0, 0, 0)
 
-        self.btn_back = QPushButton("← 返回录制")
+        self.btn_back = QPushButton("Back to Recording")
         self.btn_back.clicked.connect(self.back_requested.emit)
         nav_bar.addWidget(self.btn_back)
         nav_bar.addStretch()
@@ -94,7 +94,7 @@ class AnalysisPage(QWidget):
         vlm_bar = QHBoxLayout()
         vlm_bar.setContentsMargins(0, 0, 0, 0)
 
-        self.btn_vlm = QPushButton("VLM 深度分析")
+        self.btn_vlm = QPushButton("VLM Deep Analysis")
         self.btn_vlm.setEnabled(False)
         self.btn_vlm.clicked.connect(self._start_vlm)
         vlm_bar.addWidget(self.btn_vlm)
@@ -108,7 +108,7 @@ class AnalysisPage(QWidget):
         self.vlm_progress.hide()
         vlm_bar.addWidget(self.vlm_progress)
 
-        self.btn_export = QPushButton("导出报告")
+        self.btn_export = QPushButton("Export Report")
         self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self._on_export_report)
         self.btn_export.hide()
@@ -145,7 +145,7 @@ class AnalysisPage(QWidget):
         self._summary_browser.hide()
         self.btn_vlm.setEnabled(False)
         self.lbl_vlm_status.setText("")
-        self.lbl_status.setText("正在分析…")
+        self.lbl_status.setText("Analyzing…")
         self.progress.show()
 
         os.makedirs(TEMP_DIR, exist_ok=True)
@@ -163,11 +163,11 @@ class AnalysisPage(QWidget):
         r = result["results"].get(csv_name)
 
         if not r or r.get("status") != "ok":
-            err = r.get("reason", r.get("error", "未知错误")) if r else "无结果"
-            self.lbl_status.setText(f"分析失败: {err}")
+            err = r.get("reason", r.get("error", "Unknown error")) if r else "No results"
+            self.lbl_status.setText(f"Analysis failed: {err}")
             return
 
-        self.lbl_status.setText("分析完成")
+        self.lbl_status.setText("Analysis complete")
         self._show_stats(r)
         self._plot_chart(r)
         self._vlm_widget.show()
@@ -181,13 +181,13 @@ class AnalysisPage(QWidget):
         num_windows = r["num_windows"]
         num_frames = r["num_frames"]
 
-        label_cn = "正常" if label == "normal" else "异常"
+        label_en = "Normal" if label == "normal" else "Abnormal"
 
         self.lbl_stats.setText(
-            f'判定结果: {label_cn}\n'
-            f'置信度: {confidence:.4f}\n'
-            f'P(正常): {p_normal:.4f}  |  P(异常): {p_abnormal:.4f}\n'
-            f'滑动窗口数: {num_windows}  |  总帧数: {num_frames}'
+            f'Prediction: {label_en}\n'
+            f'Confidence: {confidence:.4f}\n'
+            f'P(Normal): {p_normal:.4f}  |  P(Abnormal): {p_abnormal:.4f}\n'
+            f'Sliding Windows: {num_windows}  |  Total Frames: {num_frames}'
         )
         self.lbl_stats.show()
 
@@ -222,7 +222,7 @@ class AnalysisPage(QWidget):
 
     def _start_vlm(self):
         self.btn_vlm.setEnabled(False)
-        self.lbl_vlm_status.setText("VLM 分析中…")
+        self.lbl_vlm_status.setText("VLM analyzing…")
         self.vlm_progress.show()
         self._sections_container.hide()
         self._summary_browser.hide()
@@ -239,7 +239,7 @@ class AnalysisPage(QWidget):
         self.btn_vlm.setEnabled(True)
         self.btn_export.setEnabled(True)
         self.btn_export.show()
-        self.lbl_vlm_status.setText("VLM 分析完成")
+        self.lbl_vlm_status.setText("VLM analysis complete")
         self._vlm_sections = result.get("sections", [])
         self._vlm_summary = result.get("summary", "")
         self._render_sections(self._vlm_sections, self._vlm_summary)
@@ -247,7 +247,7 @@ class AnalysisPage(QWidget):
     def _on_vlm_error(self, err: str):
         self.vlm_progress.hide()
         self.btn_vlm.setEnabled(True)
-        self.lbl_vlm_status.setText(f"VLM 失败: {err}")
+        self.lbl_vlm_status.setText(f"VLM failed: {err}")
 
     def _render_sections(self, sections: list[dict], summary: str):
         self._clear_sections()
@@ -288,11 +288,11 @@ class AnalysisPage(QWidget):
 
         default_name = os.path.join(
             os.path.dirname(self._video_path),
-            "VLM分析报告.docx"
+            "VLM_Analysis_Report.docx"
         )
         output_path, _ = QFileDialog.getSaveFileName(
-            self, "导出报告", default_name,
-            "Word 文档 (*.docx)"
+            self, "Export Report", default_name,
+            "Word Document (*.docx)"
         )
         if not output_path:
             return
@@ -307,10 +307,10 @@ class AnalysisPage(QWidget):
                 infer_result=self._infer_result,
                 csv_name=csv_name,
             )
-            QMessageBox.information(self, "导出成功", f"报告已保存至:\n{output_path}")
+            QMessageBox.information(self, "Export Successful", f"Report saved to:\n{output_path}")
         except Exception as e:
-            logger.exception("导出报告失败")
-            QMessageBox.critical(self, "导出失败", f"导出报告时出错:\n{e}")
+            logger.exception("Failed to export report")
+            QMessageBox.critical(self, "Export Failed", f"Error exporting report:\n{e}")
 
     def cleanup(self):
         if self._inference_worker and self._inference_worker.isRunning():

@@ -17,24 +17,24 @@ class PoseExtractor:
 
     def extract_pose(self, video_path: str, output_csv_path: str, target_size: tuple = (1080, 1920)):
         """
-        提取视频姿态数据并保存为CSV。
+        Extract pose data from video and save as CSV.
 
         Args:
-            video_path: 输入视频路径
-            output_csv_path: 输出CSV文件路径
-            target_size: 目标分辨率 (width, height)，默认 (1080, 1920)
+            video_path: Input video path
+            output_csv_path: Output CSV file path
+            target_size: Target resolution (width, height), default (1080, 1920)
 
         Yields:
-            float: 当前处理进度 (0.0 ~ 1.0)
+            float: Current processing progress (0.0 ~ 1.0)
         """
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            raise ValueError(f"无法打开视频文件: {video_path}")
+            raise ValueError(f"Cannot open video file: {video_path}")
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if total_frames <= 0:
             cap.release()
-            raise ValueError("视频帧数无效")
+            raise ValueError("Invalid video frame count")
 
         all_data = []
         frame_id = 0

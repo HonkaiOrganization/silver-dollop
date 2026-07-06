@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 class CameraManager:
     """
-    摄像机硬件调用与资源管理类。
+    Camera hardware interface and resource management class.
     """
     def __init__(self):
         self.cap = None
@@ -14,7 +14,7 @@ class CameraManager:
 
     def get_available_cameras(self) -> list:
         """
-        探测并返回当前系统可用的摄像机列表。
+        Probe and return the list of available cameras on the current system.
         """
         available = []
         for i in range(3):
@@ -25,14 +25,14 @@ class CameraManager:
         return available
 
     def open_camera(self, camera_id: int):
-        """打开指定ID的摄像机"""
+        """Open camera by specified ID"""
         if self.cap is not None:
             self.close_camera()
         self.current_id = camera_id
         self.cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
 
     def read_frame(self):
-        """读取当前帧，若失败返回 None"""
+        """Read current frame, returns None on failure"""
         if self.cap and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
@@ -40,7 +40,7 @@ class CameraManager:
         return None
 
     def close_camera(self):
-        """释放摄像机资源"""
+        """Release camera resources"""
         if self.cap is not None:
             self.cap.release()
             self.cap = None

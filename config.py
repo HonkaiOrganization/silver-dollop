@@ -1,21 +1,21 @@
 """
-全局配置模块。
-通过环境变量 POSE_ENGINE 控制姿态引擎选择。
-支持的取值：
-  - "YOLO"       (默认) 使用 YOLO-Pose
-  - "MediaPipe"  使用 Google MediaPipe Pose
+Global configuration module.
+Pose engine selection via POSE_ENGINE environment variable.
+Supported values:
+  - "YOLO"       (default) YOLO-Pose
+  - "MediaPipe"  Google MediaPipe Pose
 """
 import os
 import logging
 
-# ── 日志配置 ──────────────────────────────────────────────────────────────
+# -- Logging configuration ---------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
 )
 
-# ── 公共常量：YOLO COCO 17 关键点 ────────────────────────────────────────
+# -- Common constants: YOLO COCO 17 keypoints --------------------------------
 KPT_NAMES = [
     "nose", "L_eye", "R_eye", "L_ear", "R_ear",
     "L_sho", "R_sho", "L_elb", "R_elb",
@@ -33,18 +33,18 @@ SKELETON_LINKS = [
     (6, 8), (8, 10), (0, 1), (1, 3), (0, 2), (2, 4),
 ]
 
-# ── 姿态引擎 ────────────────────────────────────────────────────────────
+# -- Pose engine -------------------------------------------------------------
 POSE_ENGINE: str = os.getenv("POSE_ENGINE", "YOLO").strip()
 assert POSE_ENGINE in ("YOLO", "MediaPipe"), (
-    f"POSE_ENGINE 取值无效: {POSE_ENGINE!r}，仅支持 'YOLO' 或 'MediaPipe'"
+    f"Invalid POSE_ENGINE value: {POSE_ENGINE!r}, only 'YOLO' or 'MediaPipe' are supported"
 )
 
-# ── MediaPipe Tasks API 模型路径 ─────────────────────────────────────────
-# Tasks API 需要 .task 模型文件，首次使用时自动下载
-# 可选模型:
-#   pose_landmarker_lite  — 最快，精度较低 (~5MB)
-#   pose_landmarker_full  — 均衡，精度较高 (~30MB)  ← 默认
-#   pose_landmarker_heavy — 最慢，精度最高 (~50MB)
+# -- MediaPipe Tasks API model path -------------------------------------------
+# Tasks API requires .task model files, auto-downloaded on first use.
+# Available models:
+#   pose_landmarker_lite  -- fastest, lower accuracy (~5 MB)
+#   pose_landmarker_full  -- balanced, higher accuracy (~30 MB)  <-- default
+#   pose_landmarker_heavy -- slowest, highest accuracy (~50 MB)
 MEDIAPIPE_MODEL_PATH: str = os.getenv(
     "MEDIAPIPE_MODEL_PATH",
     "pretrained/pose_landmarker_full.task",
@@ -56,8 +56,8 @@ MEDIAPIPE_MODEL_URL: str = (
     "pose_landmarker_full.task"
 )
 
-# ── MediaPipe ↔ YOLO 关键点映射 ─────────────────────────────────────────
-# YOLO COCO 17 点名称（与 KPT_NAMES 保持一致）
+# -- MediaPipe-to-YOLO keypoint mapping --------------------------------------
+# YOLO COCO 17 keypoint names (kept in sync with KPT_NAMES)
 YOLO_KPT_NAMES = [
     "nose", "L_eye", "R_eye", "L_ear", "R_ear",
     "L_sho", "R_sho", "L_elb", "R_elb",
@@ -65,7 +65,7 @@ YOLO_KPT_NAMES = [
     "L_kne", "R_kne", "L_ank", "R_ank",
 ]
 
-# MediaPipe 33 个原始关键点名称
+# MediaPipe 33 raw keypoint names
 MEDIAPIPE_RAW_NAMES = [
     "nose",                          # 0
     "left_eye_inner",                # 1
@@ -102,7 +102,7 @@ MEDIAPIPE_RAW_NAMES = [
     "right_foot_index",              # 32
 ]
 
-# MediaPipe → YOLO 共享点索引映射：{mp_index: yolo_name}
+# MediaPipe -> YOLO shared keypoint index mapping: {mp_index: yolo_name}
 MEDIAPIPE_SHARED_MAP = {
     0:  "nose",
     2:  "L_eye",
@@ -123,46 +123,46 @@ MEDIAPIPE_SHARED_MAP = {
     28: "R_ank",
 }
 
-# MediaPipe 独有点索引（不在 YOLO 中的）
+# MediaPipe unique keypoint indices (not present in YOLO)
 MEDIAPIPE_UNIQUE_INDICES = [
     i for i in range(33) if i not in MEDIAPIPE_SHARED_MAP
 ]
 
-# CSV 列命名：共享点用 YOLO 同名，独有点加 _mp 后缀
-# 顺序：先放 17 个 YOLO 共享点（按 YOLO 顺序），再放 16 个 MediaPipe 独有点（按 MP 顺序）
+# CSV column naming: shared keypoints use YOLO names, unique ones get _mp suffix.
+# Order: 17 YOLO-shared keypoints (in YOLO order), then 16 MediaPipe-unique (in MP order).
 def _build_mediapipe_csv_kpt_names() -> list[str]:
-    """返回 33 个关键点的 CSV 列命名（与 MediaPipe 原始索引一一对应）。"""
+    """Return 33 keypoint CSV column names (1:1 mapping with MediaPipe raw indices)."""
     names = []
     for i in range(33):
         if i in MEDIAPIPE_SHARED_MAP:
-            names.append(MEDIAPIPE_SHARED_MAP[i])   # 与 YOLO 同名
+            names.append(MEDIAPIPE_SHARED_MAP[i])   # same name as YOLO
         else:
-            names.append(f"{MEDIAPIPE_RAW_NAMES[i]}_mp")  # 加 _mp 后缀
+            names.append(f"{MEDIAPIPE_RAW_NAMES[i]}_mp")  # append _mp suffix
     return names
 
 MEDIAPIPE_CSV_KPT_NAMES = _build_mediapipe_csv_kpt_names()
 
-# 推理时只读取 YOLO 兼容的 17 列（索引列表，相对于 33 点 CSV 列）
-# 即 MEDIAPIPE_SHARED_MAP 的 key，按 YOLO 顺序排列
+# Inference reads only the YOLO-compatible 17 columns (index list relative to 33-point CSV).
+# These are MEDIAPIPE_SHARED_MAP keys sorted by YOLO keypoint order.
 YOLO_COMPATIBLE_MP_INDICES = [
     mp_idx for mp_idx, _ in sorted(MEDIAPIPE_SHARED_MAP.items(), key=lambda kv: YOLO_KPT_NAMES.index(kv[1]))
 ]
 
-# ── MediaPipe 骨架连接定义（33 点）──────────────────────────────────────
+# -- MediaPipe skeleton connectivity (33 keypoints) --------------------------
 MEDIAPIPE_SKELETON_BONES = [
-    # 脸部
+    # Face
     (0, 1), (1, 2), (2, 3), (3, 7),
     (0, 4), (4, 5), (5, 6), (6, 8),
     (9, 10),
-    # 躯干
+    # Torso
     (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),
     (11, 23), (12, 24), (23, 24),
-    # 手部
+    # Hands
     (15, 17), (15, 19), (15, 21),
     (16, 18), (16, 20), (16, 22),
-    # 下肢
+    # Lower limbs
     (23, 25), (25, 27), (27, 29), (27, 31),
     (24, 26), (26, 28), (28, 30), (28, 32),
-    # 足部
+    # Feet
     (29, 31), (30, 32),
 ]

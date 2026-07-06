@@ -3,8 +3,8 @@ import numpy as np
 
 class FrameProcessor:
     """
-    基础图像帧处理类。
-    仅保留 9:16 比例直通，其余比例一律执行中心裁剪。
+    Base image frame processing class.
+    Passes through 9:16 aspect ratio unchanged; all other ratios are center-cropped.
     """
     TARGET_ASPECT = 9 / 16
     TOLERANCE = 0.05

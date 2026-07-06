@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class PlaybackThread(QThread):
     """
-    从 MP4 + CSV 回放相机帧与骨架帧。
+    Replay camera frames and skeleton frames from MP4 + CSV.
     """
     frames_ready = Signal(object, object, int)  # (camera_bgr, skeleton_bgr, frame_idx)
     keypoints_ready = Signal(object, object)      # (xy [17,2], conf [17]) or (None, None)
@@ -34,7 +34,7 @@ class PlaybackThread(QThread):
         self._playing = False
 
     # ------------------------------------------------------------------
-    # 控制接口
+    # Control interface
     # ------------------------------------------------------------------
     def play(self):
         self._paused = False
@@ -55,7 +55,7 @@ class PlaybackThread(QThread):
         return self._playing and not self._paused
 
     # ------------------------------------------------------------------
-    # 线程主体
+    # Thread main loop
     # ------------------------------------------------------------------
     def run(self):
         self._is_running = True
@@ -67,7 +67,7 @@ class PlaybackThread(QThread):
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        # 加载 CSV，按 frame_id 预建索引（避免每帧过滤 DataFrame）
+        # Load CSV, pre-build index by frame_id (avoid filtering DataFrame per frame)
         df = pd.read_csv(self.csv_path)
         frame_kpts = self._build_frame_index(df, total_frames)
 
@@ -75,13 +75,13 @@ class PlaybackThread(QThread):
         frame_interval_ms = int(1000 / fps)
 
         while self._is_running:
-            # 处理 seek 请求
+            # Handle seek request
             if self._seek_to >= 0:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, self._seek_to)
                 frame_idx = self._seek_to
                 self._seek_to = -1
 
-            # 暂停时休眠
+            # Sleep when paused
             if self._paused or not self._playing:
                 self.msleep(50)
                 continue
@@ -93,7 +93,7 @@ class PlaybackThread(QThread):
                 self.playback_finished.emit()
                 continue
 
-            # 从 CSV 渲染骨架
+            # Render skeleton from CSV
             skeleton_canvas = np.zeros((self.skeleton_size[1], self.skeleton_size[0], 3),
                                       dtype=np.uint8)
             if frame_idx < len(frame_kpts):
@@ -111,11 +111,11 @@ class PlaybackThread(QThread):
         cap.release()
 
     # ------------------------------------------------------------------
-    # 内部方法
+    # Internal methods
     # ------------------------------------------------------------------
     def _build_frame_index(self, df: pd.DataFrame, total_frames: int) -> list[tuple[Optional[np.ndarray], Optional[np.ndarray]]]:
         """
-        将 DataFrame 按 frame_id 构建为列表，每个元素为 (xy, conf) 或 (None, None)。
+        Build a list from DataFrame grouped by frame_id, each element is (xy, conf) or (None, None).
         xy: [17, 2] np.ndarray, conf: [17] np.ndarray
         """
         x_cols = [f"{n}_x" for n in KPT_NAMES]

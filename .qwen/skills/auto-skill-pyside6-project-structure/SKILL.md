@@ -1,31 +1,31 @@
 ---
 name: pyside6-project-structure
-description: PySide6 GUI项目工程化规范：包结构拆分、公共常量提取、widgets/workers分层、原生风格UI、logging替代print
+description: PySide6 GUI project engineering standards — package structure decomposition, shared constant extraction, widgets/workers layering, native-style UI, logging over print
 source: auto-skill
 extracted_at: '2026-07-04T12:00:00.000Z'
 ---
 
-# PySide6 项目工程化规范
+# PySide6 Project Engineering Standards
 
-将"能跑就行"的 PySide6 项目重构为符合通用 GUI 项目规范的工程化结构。
+Restructure a "just-make-it-run" PySide6 project into an engineering-grade layout that follows standard GUI project conventions.
 
-## 目标目录结构
+## Target Directory Structure
 
 ```
 project_root/
-├── app.py                    # 入口：QApplication + MainWindow
-├── config.py                 # 全局配置 + 公共常量 + logging 配置
-├── requirements.txt          # 依赖清单
-├── core/                     # 业务逻辑层（与 GUI 无关）
-│   ├── __init__.py           # 空文件（标记为包）
+├── app.py                    # Entry point: QApplication + MainWindow
+├── config.py                 # Global configuration + shared constants + logging setup
+├── requirements.txt          # Dependency manifest
+├── core/                     # Business logic layer (GUI-independent)
+│   ├── __init__.py           # Empty file (marks directory as a package)
 │   ├── extractor/
-│   │   ├── __init__.py       # 纯导出：from .extractor import PoseExtractor
-│   │   └── extractor.py      # 实际实现
+│   │   ├── __init__.py       # Pure re-export: from .extractor import PoseExtractor
+│   │   └── extractor.py      # Actual implementation
 │   ├── infer/
 │   │   ├── __init__.py
 │   │   └── inference.py
 │   └── ...
-├── models/                   # 数据/模型层
+├── models/                   # Data / model layer
 │   ├── __init__.py
 │   ├── camera/
 │   │   ├── __init__.py
@@ -36,47 +36,47 @@ project_root/
 │   └── pose/
 │       ├── __init__.py
 │       └── processor.py
-├── gui/                      # GUI 层
+├── gui/                      # GUI layer
 │   ├── __init__.py
-│   ├── main_window.py        # 主窗口
-│   ├── analysis_page.py      # 分析页（仅页面逻辑）
-│   ├── camera_thread.py      # 线程类
+│   ├── main_window.py        # Main window
+│   ├── analysis_page.py      # Analysis page (page-level logic only)
+│   ├── camera_thread.py      # Thread classes
 │   ├── playback_thread.py
 │   ├── file_import_thread.py
 │   ├── frame_processor.py
-│   ├── widgets/              # 可复用 UI 组件
+│   ├── widgets/              # Reusable UI components
 │   │   ├── __init__.py
 │   │   ├── video_player.py
 │   │   └── section_card.py
-│   └── workers/              # 后台线程（QThread）
+│   └── workers/              # Background threads (QThread)
 │       ├── __init__.py
 │       ├── inference_worker.py
 │       └── vlm_worker.py
-├── utils/                    # 工具函数
+├── utils/                    # Utility functions
 │   ├── __init__.py
 │   └── load_csv/
 │       ├── __init__.py
 │       └── loader.py
-└── legacy/                   # 旧版代码（不删除，归档）
+└── legacy/                   # Legacy code (archived, not deleted)
     └── gui.py
 ```
 
-## 核心原则
+## Core Principles
 
-### 1. `__init__.py` 只做导出
+### 1. `__init__.py` for Re-exports Only
 
-实现代码永远不要放在 `__init__.py` 里。`__init__.py` 只做一件事：从同目录的模块文件 re-export。
+Implementation code must never reside in `__init__.py`. The sole purpose of `__init__.py` is to re-export symbols from sibling module files within the same directory.
 
 ```python
 # core/extractor/__init__.py
 from .extractor import PoseExtractor
 ```
 
-**好处**：避免循环导入、IDE 跳转更准确、模块可独立测试。
+**Benefits**: Avoids circular imports, improves IDE jump-to-definition accuracy, and enables independent module testing.
 
-### 2. 公共常量集中管理
+### 2. Centralize Shared Constants
 
-`KPT_NAMES`、`CSV_COLUMNS`、`SKELETON_LINKS` 等常量如果出现在 2+ 个文件中，必须提取到 `config.py`。
+Constants such as `KPT_NAMES`, `CSV_COLUMNS`, `SKELETON_LINKS` must be extracted to `config.py` if they appear in 2 or more files.
 
 ```python
 # config.py
@@ -85,41 +85,41 @@ CSV_COLUMNS = ["frame_id", "person_id"] + [...]
 SKELETON_LINKS = [(15, 13), (13, 11), ...]
 ```
 
-所有引用方：`from config import KPT_NAMES, CSV_COLUMNS`
+All consumers: `from config import KPT_NAMES, CSV_COLUMNS`
 
-### 3. GUI 分层：widgets/ + workers/
+### 3. GUI Layering: widgets/ + workers/
 
-当一个页面文件超过 200 行或包含 3+ 个类时，拆分：
+When a single page file exceeds 200 lines or contains 3 or more classes, decompose it:
 
-- `gui/widgets/` — 可复用 UI 组件（VideoPlayer、SectionCard 等）
-- `gui/workers/` — QThread 后台线程（InferenceWorker、VLMWorker 等）
-- 页面文件只保留页面级布局和事件处理
+- `gui/widgets/` — Reusable UI components (VideoPlayer, SectionCard, etc.)
+- `gui/workers/` — QThread background workers (InferenceWorker, VLMWorker, etc.)
+- The page file retains only page-level layout and event handling
 
-### 4. 原生 PySide 风格
+### 4. Native PySide Style
 
-**不要**大量使用 `setStyleSheet` 硬编码暗色主题。保持系统原生外观：
+**Do not** use extensive `setStyleSheet` calls to hardcode a dark theme. Preserve the native system appearance:
 
 ```python
-# 好的做法：仅保留功能性样式
-self.camera_view.setStyleSheet("background-color: black;")  # 视频区域需要黑底
+# Good practice: functional styles only
+self.camera_view.setStyleSheet("background-color: black;")  # Video area requires a black background
 
-# 不好的做法：自定义按钮颜色、圆角、渐变
+# Bad practice: custom button colors, rounded corners, gradients
 self.btn.setStyleSheet(
     "QPushButton{background:#c0392b;color:#fff;border-radius:4px;padding:6px 18px}"
     "QPushButton:hover{background:#e74c3c}"
 )
 ```
 
-**替代方案**：
-- 用 `QFrame.Shape.StyledPanel` 代替自定义卡片样式
-- 用 `QStyle.StandardPixmap` 标准图标
-- 按钮使用系统默认外观
-- matplotlib 图表使用默认配色（不设置 facecolor）
+**Alternatives**:
+- Use `QFrame.Shape.StyledPanel` instead of custom card styles
+- Use `QStyle.StandardPixmap` for standard icons
+- Keep buttons with the default system appearance
+- Use default color schemes for matplotlib charts (do not set `facecolor`)
 
-### 5. logging 替代 print
+### 5. Use logging Instead of print
 
 ```python
-# config.py 中统一配置
+# Unified configuration in config.py
 import logging
 logging.basicConfig(
     level=logging.INFO,
@@ -127,14 +127,14 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-# 各模块中使用
+# In each module
 logger = logging.getLogger(__name__)
-logger.info("录制完成，保存视频: %s, CSV: %s", video_path, csv_path)
+logger.info("Recording complete — saved video: %s, CSV: %s", video_path, csv_path)
 ```
 
-### 6. 包级 `__init__.py` 不可省略
+### 6. Package-Level `__init__.py` Is Mandatory
 
-`core/`、`models/`、`utils/` 等顶层包目录必须有 `__init__.py`（可以是空文件），否则 Python 不会识别为包。
+Top-level package directories such as `core/`, `models/`, `utils/` must each contain an `__init__.py` file (it may be empty); otherwise Python will not recognize the directory as a package.
 
 ### 7. requirements.txt
 
@@ -152,18 +152,18 @@ requests
 click
 ```
 
-### 8. 旧代码归档而非删除
+### 8. Archive Legacy Code Instead of Deleting It
 
-旧版 `gui.py`（Gradio WebUI）移入 `legacy/` 目录，保留可追溯性。
+Move the legacy `gui.py` (Gradio WebUI) into the `legacy/` directory to preserve traceability.
 
-## 重构检查清单
+## Refactoring Checklist
 
-- [ ] 所有 `__init__.py` 中的实现代码移到独立 `.py` 文件
-- [ ] 重复常量提取到 `config.py`
-- [ ] 超过 200 行的 GUI 文件拆分为 widgets/ + workers/
-- [ ] 移除硬编码暗色 `setStyleSheet`，保留功能性样式
-- [ ] `print()` → `logger.info/debug/error()`
-- [ ] 添加 `requirements.txt`
-- [ ] 所有包目录有 `__init__.py`
-- [ ] 旧代码移入 `legacy/`
-- [ ] 验证所有导入：`python -c "from gui.main_window import MainWindow"`
+- [ ] Move all implementation code out of `__init__.py` files into dedicated `.py` modules
+- [ ] Extract duplicate constants into `config.py`
+- [ ] Split GUI files exceeding 200 lines into widgets/ + workers/
+- [ ] Remove hardcoded dark-theme `setStyleSheet` calls; retain functional styles only
+- [ ] Replace `print()` with `logger.info/debug/error()`
+- [ ] Add `requirements.txt`
+- [ ] Ensure every package directory contains an `__init__.py`
+- [ ] Move legacy code into `legacy/`
+- [ ] Verify all imports: `python -c "from gui.main_window import MainWindow"`

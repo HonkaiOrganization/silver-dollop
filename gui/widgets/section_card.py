@@ -29,15 +29,15 @@ class SectionCard(QFrame):
 
         prob = section["prob"]
         if prob > 0.7:
-            prob_text = f"异常概率 {prob:.1%}"
+            prob_text = f"Abnormal Prob {prob:.1%}"
         elif prob > 0.5:
-            prob_text = f"异常概率 {prob:.1%}"
+            prob_text = f"Abnormal Prob {prob:.1%}"
         else:
-            prob_text = f"异常概率 {prob:.1%}"
+            prob_text = f"Abnormal Prob {prob:.1%}"
         prob_lbl = QLabel(prob_text)
         header.addWidget(prob_lbl)
 
-        frame_lbl = QLabel(f"帧 {section['start_frame']}-{section['end_frame']}")
+        frame_lbl = QLabel(f"Frame {section['start_frame']}-{section['end_frame']}")
         header.addWidget(frame_lbl)
 
         layout.addLayout(header)

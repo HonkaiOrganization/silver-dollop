@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 class FileImportThread(QThread):
     """
-    从外部视频文件逐帧执行姿态推理，生成 MP4 + CSV，
-    完成后发射 finished 信号供主窗口切换到回放模式。
+    Perform frame-by-frame pose inference from an external video file, generating MP4 + CSV,
+    then emit finished signal for the main window to switch to playback mode.
     """
     progress = Signal(int, int)       # (current_frame, total_frames)
     finished = Signal(str, str, int, float)  # (video_path, csv_path, total_frames, fps)
@@ -38,7 +38,7 @@ class FileImportThread(QThread):
         try:
             cap = cv2.VideoCapture(self.video_path)
             if not cap.isOpened():
-                self.error.emit(f"无法打开视频文件: {self.video_path}")
+                self.error.emit(f"Cannot open video file: {self.video_path}")
                 return
 
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -46,7 +46,7 @@ class FileImportThread(QThread):
 
             if total_frames <= 0:
                 cap.release()
-                self.error.emit("视频文件无效（帧数为 0）")
+                self.error.emit("Invalid video file (frame count is 0)")
                 return
 
             os.makedirs(os.path.dirname(self.output_video) or ".", exist_ok=True)

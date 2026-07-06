@@ -17,10 +17,10 @@ LABEL_MAP = {0: 'abnormal', 1: 'normal'}
 class JumpRopeInference:
     def __init__(self, model_path: str = 'pretrained/model_export.pt'):
         """
-        初始化推理器并加载模型。
+        Initialize inference engine and load model.
 
         Args:
-            model_path: 导出的模型文件路径 (.pt)
+            model_path: Exported model file path (.pt)
         """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -39,13 +39,13 @@ class JumpRopeInference:
 
     def _segment_and_predict(self, coords: np.ndarray) -> dict:
         """
-        对单个视频片段进行滑窗推理。
+        Perform sliding window inference on a single video segment.
         """
         num_frames = coords.shape[0]
         if num_frames < self.window_size:
             return {
                 'status': 'skip',
-                'reason': f'帧数不足: {num_frames} < {self.window_size}'
+                'reason': f'Insufficient frames count: {num_frames} < {self.window_size}'
             }
 
         window_probs = []
@@ -88,14 +88,14 @@ class JumpRopeInference:
 
     def predict(self, input_path: str, output_json_path: str | None = None) -> dict:
         """
-        对 CSV 文件或目录进行批量推理。
+        Perform batch inference on CSV files or directories.
 
         Args:
-            input_path: 输入 CSV 文件或目录路径
-            output_json_path: 输出 JSON 结果文件路径 (可选)
+            input_path: Input CSV file or directory path
+            output_json_path: Output JSON result file path (optional)
 
         Returns:
-            dict: 包含各文件推理详细结果及总体统计信息的字典
+            dict: Dictionary containing per-file inference details and summary statistics
         """
         if os.path.isfile(input_path):
             csv_files = [input_path]
@@ -103,7 +103,7 @@ class JumpRopeInference:
             csv_files = sorted(glob.glob(os.path.join(input_path, '**', '*.csv'), recursive=True))
 
         if not csv_files:
-            raise ValueError(f"未找到 CSV 文件: {input_path}")
+            raise ValueError(f"No CSV files found: {input_path}")
 
         results = {}
         for csv_path in csv_files:

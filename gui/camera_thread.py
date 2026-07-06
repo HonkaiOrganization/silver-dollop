@@ -16,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 class CameraThread(QThread):
     """
-    摄像机读取与姿态推理联合线程，支持录制。
+    Camera capture and pose inference combined thread with recording support.
     """
     frames_ready = Signal(object, object)          # (camera_bgr, skeleton_bgr)
     keypoints_ready = Signal(object, object)       # (xy [17,2], conf [17]) or (None, None)
     recording_progress = Signal(float, float)      # (elapsed_sec, frames_written)
     recording_saved = Signal(str, str, int, float) # (video_path, csv_path, total_frames, fps)
-    recording_too_short = Signal()                 # 录制不足 10 秒
+    recording_too_short = Signal()                 # Recording shorter than 10 seconds
 
     def __init__(self, camera_manager: CameraManager, pose_processor: PoseProcessor):
         super().__init__()
@@ -42,7 +42,7 @@ class CameraThread(QThread):
         self._stop_requested = False
 
     def start_recording(self, video_path: str, csv_path: str, fps: float = 30.0):
-        """开始录制（在下一帧处理时生效）"""
+        """Start recording (takes effect on next frame)"""
         self._video_path = video_path
         self._csv_path = csv_path
         self._record_fps = fps
@@ -58,7 +58,7 @@ class CameraThread(QThread):
         self._video_writer = cv2.VideoWriter(video_path, fourcc, fps, (w, h))
 
     def stop_recording(self):
-        """请求停止录制（实际保存在线程内完成，通过信号通知主线程）"""
+        """Request stop recording (actual save completed in thread, notifies main thread via signal)"""
         self._stop_requested = True
 
     def is_recording(self) -> bool:
@@ -96,7 +96,7 @@ class CameraThread(QThread):
         self.wait(3000)
 
     def _record_frame(self, processed_camera: np.ndarray, pose_result: dict):
-        """将当前帧写入录制文件"""
+        """Write current frame to recording files"""
         w, h = self.skeleton_target_size
         cam_resized = cv2.resize(processed_camera, (w, h), interpolation=cv2.INTER_LINEAR)
         if self._video_writer is not None:
@@ -116,8 +116,8 @@ class CameraThread(QThread):
         self.recording_progress.emit(elapsed, float(self._record_frame_id))
 
     def _finish_recording(self):
-        """关闭文件并发送录制完成信号"""
-        logger.info("录制完成，保存视频: %s, CSV: %s", self._video_path, self._csv_path)
+        """Finalize files and emit recording complete signal"""
+        logger.info("Recording complete, saved video: %s, CSV: %s", self._video_path, self._csv_path)
         elapsed = time.time() - self._record_start_time
 
         if self._video_writer is not None:

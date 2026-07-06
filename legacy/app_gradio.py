@@ -37,15 +37,15 @@ with gr.Blocks() as app:
         infer_json_output = gr.File(label="Inference Result (JSON)", interactive=False)
 
     with gr.Tab("VLM Analysis"):
-        vlm_video = gr.Video(label="原始视频")
-        vlm_json = gr.File(label="推理结果 (JSON)")
-        vlm_button = gr.Button("开始 VLM 分析")
-        vlm_status = gr.Textbox(label="分析状态", interactive=False)
-        vlm_report = gr.Markdown(label="分析报告")
+        vlm_video = gr.Video(label="Source Video")
+        vlm_json = gr.File(label="Inference Result (JSON)")
+        vlm_button = gr.Button("Start VLM Analysis")
+        vlm_status = gr.Textbox(label="Analysis Status", interactive=False)
+        vlm_report = gr.Markdown(label="Analysis Report")
 
     def process_video(video, progress=gr.Progress()):
         if video is None:
-            raise gr.Error("请先上传视频文件")
+            raise gr.Error("Please upload a video file first")
         output_csv = f"output/pose_data_{uuid.uuid4()}.csv"
         for i in extractor.extract_pose(video, output_csv):
             progress(i/2)
@@ -56,7 +56,7 @@ with gr.Blocks() as app:
 
     def process_csv(csv, progress=gr.Progress()):
         if csv is None:
-            raise gr.Error("请先上传CSV文件")
+            raise gr.Error("Please upload a CSV file first")
         output_video = f"output/skeleton_video_{uuid.uuid4()}.mp4"
         for i in visualize_pose(csv, output_video):
             progress(i)
@@ -74,7 +74,7 @@ with gr.Blocks() as app:
     )
     def run_inference(csv_files):
         if not csv_files:
-            raise gr.Error("请先上传CSV文件")
+            raise gr.Error("Please upload a CSV file first")
 
         # Gradio file_count="multiple" returns a list of file paths
         if isinstance(csv_files, str):
@@ -86,7 +86,7 @@ with gr.Blocks() as app:
 
         for i, csv_path in enumerate(csv_files, 1):
             fname = os.path.basename(csv_path)
-            status_lines.append(f"[{i}/{len(csv_files)}] 正在处理: {fname}")
+            status_lines.append(f"[{i}/{len(csv_files)}] Processing: {fname}")
             try:
                 result = inference.predict(csv_path, output_json_path=output_json)
                 for r_fname, r_data in result["results"].items():
@@ -96,9 +96,9 @@ with gr.Blocks() as app:
                     status_lines.append(f"  -> {r_ok['predicted_label']} (confidence: {r_ok['confidence']:.4f})")
                 else:
                     err = r_ok.get("reason", r_ok.get("error", "unknown")) if r_ok else "no result"
-                    status_lines.append(f"  -> 失败: {err}")
+                    status_lines.append(f"  -> Failed: {err}")
             except Exception as e:
-                status_lines.append(f"  -> 错误: {str(e)}")
+                status_lines.append(f"  -> Error: {str(e)}")
                 all_results[fname] = {"status": "error", "error": str(e)}
 
         rows = []
@@ -157,12 +157,12 @@ with gr.Blocks() as app:
 
     def run_vlm_analysis(video, json_file):
         if video is None:
-            raise gr.Error("请先上传原始视频文件")
+            raise gr.Error("Please upload the source video file first")
         if json_file is None:
-            raise gr.Error("请先上传推理结果 JSON 文件")
+            raise gr.Error("Please upload the inference result JSON file first")
 
         result = analyze_windows(video, json_file, top_k=3)
-        return "分析完成", result["markdown"]
+        return "Analysis complete", result["markdown"]
 
     vlm_button.click(
         run_vlm_analysis,

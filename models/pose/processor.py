@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 class PoseProcessor:
     """
-    姿态识别处理类。
-    负责加载 YOLO 模型并提取人体骨架关键点。
+    Pose estimation processing class.
+    Responsible for loading YOLO model and extracting human skeleton keypoints.
     """
     KEYPOINT_NAMES = KPT_NAMES
 
@@ -83,7 +83,7 @@ class PoseProcessor:
 
     @staticmethod
     def _calc_angle_deg(a: tuple, b: tuple, c: tuple) -> float:
-        """计算向量 ba 与 bc 在顶点 b 处的夹角（度）"""
+        """Compute the angle (in degrees) between vectors ba and bc at vertex b."""
         ba = np.array(a, dtype=np.float64) - np.array(b, dtype=np.float64)
         bc = np.array(c, dtype=np.float64) - np.array(b, dtype=np.float64)
         cos = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-9)
@@ -93,7 +93,7 @@ class PoseProcessor:
     def _draw_angle_arc(canvas, vertex, pt_a, pt_c, angle_deg, color,
                         arc_radius=44, font=cv2.FONT_HERSHEY_SIMPLEX,
                         font_scale=0.62, font_thickness=2):
-        """在顶点处绘制角度弧线及数值标注"""
+        """Draw angle arc and value annotation at vertex."""
         vx, vy = vertex
         ang_a = math.degrees(math.atan2(pt_a[1] - vy, pt_a[0] - vx))
         ang_c = math.degrees(math.atan2(pt_c[1] - vy, pt_c[0] - vx))
@@ -128,7 +128,7 @@ class PoseProcessor:
     @classmethod
     def render_skeleton(cls, canvas, xy, conf, conf_thresh=0.5):
         """
-        在画布上绘制骨架（静态方法，可供录制回放等场景复用）。
+        Render skeleton on canvas (static method, reusable for recording/playback scenarios).
         """
         valid_kpts = []
         for i in range(17):
@@ -160,7 +160,7 @@ class PoseProcessor:
 
     def process(self, frame: np.ndarray, target_size: tuple = (1080, 1920)) -> dict:
         """
-        执行姿态推理，返回结构化数据。
+        Run pose inference, returning structured data.
         """
         h, w = frame.shape[:2]
         input_frame = cv2.resize(frame, target_size, interpolation=cv2.INTER_LINEAR)
