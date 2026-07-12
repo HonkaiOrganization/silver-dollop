@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
 
 from models.camera import CameraManager
 from models.pose import PoseProcessor
@@ -19,6 +18,7 @@ from gui.camera_thread import CameraThread
 from gui.playback_thread import PlaybackThread
 from gui.analysis_page import AnalysisPage
 from gui.file_import_thread import FileImportThread
+from gui.widgets import VideoDisplay, SkeletonDisplay
 from config import KPT_NAMES
 
 logger = logging.getLogger(__name__)
@@ -34,8 +34,6 @@ class MainWindow(QMainWindow):
         self.camera_thread: CameraThread | None = None
         self.playback_thread: PlaybackThread | None = None
 
-        self._last_camera_pixmap = None
-        self._last_skeleton_pixmap = None
         self._mode = "recording"
         self._import_thread: FileImportThread | None = None
         self._import_dialog: QWidget | None = None
@@ -149,40 +147,11 @@ class MainWindow(QMainWindow):
         views_layout = QHBoxLayout()
         views_layout.setSpacing(10)
 
-        left_container = QWidget()
-        left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        self.video_display = VideoDisplay()
+        self.skeleton_display = SkeletonDisplay()
 
-        self.camera_view = QLabel()
-        self.camera_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_view.setStyleSheet("background-color: black;")
-        self.camera_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self.camera_view.setMinimumSize(1, 1)
-
-        self.lbl_camera_title = QLabel("Camera Feed")
-        self.lbl_camera_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        left_layout.addWidget(self.lbl_camera_title)
-        left_layout.addWidget(self.camera_view, 1)
-
-        right_container = QWidget()
-        right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.skeleton_view = QLabel()
-        self.skeleton_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.skeleton_view.setStyleSheet("background-color: black;")
-        self.skeleton_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self.skeleton_view.setMinimumSize(1, 1)
-
-        self.lbl_skeleton_title = QLabel("Pose Skeleton")
-        self.lbl_skeleton_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        right_layout.addWidget(self.lbl_skeleton_title)
-        right_layout.addWidget(self.skeleton_view, 1)
-
-        views_layout.addWidget(left_container, 1)
-        views_layout.addWidget(right_container, 1)
+        views_layout.addWidget(self.video_display, 1)
+        views_layout.addWidget(self.skeleton_display, 1)
 
         # -- Keypoint coordinate table + confidence --------------------------------
         kpt_panel = QWidget()
@@ -258,8 +227,8 @@ class MainWindow(QMainWindow):
             self.camera_manager.open_camera(cam_id)
 
     def _on_live_frames(self, camera_bgr: np.ndarray, skeleton_bgr: np.ndarray):
-        self._update_pixmap(self.camera_view, camera_bgr, attr="_last_camera_pixmap")
-        self._update_pixmap(self.skeleton_view, skeleton_bgr, attr="_last_skeleton_pixmap")
+        self.video_display.update_frame(camera_bgr)
+        self.skeleton_display.update_frame(skeleton_bgr)
 
     def _on_keypoints_updated(self, xy, conf):
         for i in range(17):
@@ -271,18 +240,6 @@ class MainWindow(QMainWindow):
                 y_val = "-"
             self.kpt_table.item(i, 1).setText(x_val)
             self.kpt_table.item(i, 2).setText(y_val)
-
-    def _update_pixmap(self, label: QLabel, bgr: np.ndarray, attr: str):
-        arr = np.ascontiguousarray(bgr)
-        h, w, ch = arr.shape
-        qimg = QImage(arr.data, w, h, ch * w, QImage.Format.Format_BGR888).copy()
-        pixmap = QPixmap.fromImage(qimg)
-        setattr(self, attr, pixmap)
-        label.setPixmap(pixmap.scaled(
-            label.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        ))
 
     def _on_start_recording(self):
         if self.camera_thread is None:
@@ -374,13 +331,13 @@ class MainWindow(QMainWindow):
         self.playback_thread.playback_finished.connect(self._on_playback_finished)
         self.playback_thread.start()
 
-        self.lbl_camera_title.setText("Playback")
-        self.lbl_skeleton_title.setText("Skeleton Playback")
+        self.video_display.title = "Playback"
+        self.skeleton_display.title = "Skeleton Playback"
 
     def _on_playback_frames(self, camera_bgr: np.ndarray, skeleton_bgr: np.ndarray,
                             frame_idx: int):
-        self._update_pixmap(self.camera_view, camera_bgr, attr="_last_camera_pixmap")
-        self._update_pixmap(self.skeleton_view, skeleton_bgr, attr="_last_skeleton_pixmap")
+        self.video_display.update_frame(camera_bgr)
+        self.skeleton_display.update_frame(skeleton_bgr)
 
         if not self._slider_dragging:
             self.slider_progress.setValue(frame_idx)
@@ -418,10 +375,8 @@ class MainWindow(QMainWindow):
             self.playback_thread.stop()
             self.playback_thread = None
 
-        self.camera_view.clear()
-        self.skeleton_view.clear()
-        self._last_camera_pixmap = None
-        self._last_skeleton_pixmap = None
+        self.video_display.clear()
+        self.skeleton_display.clear()
 
         for i in range(17):
             self.kpt_table.item(i, 1).setText("-")
@@ -436,8 +391,8 @@ class MainWindow(QMainWindow):
         self.camera_selector.setEnabled(True)
         self.lbl_rec_status.setText("")
 
-        self.lbl_camera_title.setText("Camera Feed")
-        self.lbl_skeleton_title.setText("Pose Skeleton")
+        self.video_display.title = "Camera Feed"
+        self.skeleton_display.title = "Pose Skeleton"
 
         self.init_camera_system()
 
@@ -603,21 +558,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(buttons)
 
         dialog.exec()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self._last_camera_pixmap:
-            self.camera_view.setPixmap(self._last_camera_pixmap.scaled(
-                self.camera_view.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            ))
-        if self._last_skeleton_pixmap:
-            self.skeleton_view.setPixmap(self._last_skeleton_pixmap.scaled(
-                self.skeleton_view.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            ))
 
     def closeEvent(self, event):
         if self._countdown_timer:

@@ -18,14 +18,15 @@ project_root/
 ├── requirements.txt          # Dependency manifest
 ├── core/                     # Business logic layer (GUI-independent)
 │   ├── __init__.py           # Empty file (marks directory as a package)
-│   ├── extractor/
-│   │   ├── __init__.py       # Pure re-export: from .extractor import PoseExtractor
-│   │   └── extractor.py      # Actual implementation
 │   ├── infer/
 │   │   ├── __init__.py
 │   │   └── inference.py
-│   └── ...
-├── models/                   # Data / model layer
+│   ├── vlm/
+│   │   ├── __init__.py
+│   │   └── analyzer.py
+│   └── export_report/
+│       └── __init__.py       # Word report export (module, not utility)
+├── models/                   # Data / model layer (single source of truth for pose)
 │   ├── __init__.py
 │   ├── camera/
 │   │   ├── __init__.py
@@ -35,7 +36,7 @@ project_root/
 │   │   └── classifier.py
 │   └── pose/
 │       ├── __init__.py
-│       └── processor.py
+│       └── processor.py      # PoseProcessor: YOLO inference + skeleton rendering
 ├── gui/                      # GUI layer
 │   ├── __init__.py
 │   ├── main_window.py        # Main window
@@ -46,8 +47,9 @@ project_root/
 │   ├── frame_processor.py
 │   ├── widgets/              # Reusable UI components
 │   │   ├── __init__.py
-│   │   ├── video_player.py
-│   │   └── section_card.py
+│   │   ├── frame_display.py  # FrameDisplay base (BGR→QPixmap + resize)
+│   │   ├── video_display.py  # VideoDisplay + SkeletonDisplay (subclasses)
+│   │   └── section_card.py   # SectionCard (mosaic image, no video player)
 │   └── workers/              # Background threads (QThread)
 │       ├── __init__.py
 │       ├── inference_worker.py
@@ -58,8 +60,10 @@ project_root/
 │       ├── __init__.py
 │       └── loader.py
 └── legacy/                   # Legacy code (archived, not deleted)
-    └── gui.py
+    └── app_gradio.py
 ```
+
+**Key principle**: Do NOT duplicate YOLO pose logic across packages. `models/pose/processor.py` is the single source of truth for pose estimation and skeleton rendering. Both recording (CameraThread) and playback (PlaybackThread) use `PoseProcessor`.
 
 ## Core Principles
 

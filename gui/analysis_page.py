@@ -298,7 +298,7 @@ class AnalysisPage(QWidget):
             return
 
         try:
-            from utils.export_report import export_vlm_report
+            from core.export_report import export_vlm_report
             csv_name = os.path.basename(self._csv_path)
             export_vlm_report(
                 output_path=output_path,

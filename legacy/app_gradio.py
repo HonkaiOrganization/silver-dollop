@@ -2,16 +2,17 @@ import os
 import gradio as gr
 import numpy as np
 import pandas as pd
+import cv2
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from core.extractor import PoseExtractor
-from core.visualizer import visualize_pose
+from models.pose import PoseProcessor
+from config import KPT_NAMES, CSV_COLUMNS
 from core.infer import JumpRopeInference
 from core.vlm import analyze_windows
 import uuid
 
-extractor = PoseExtractor()
+pose_processor = PoseProcessor()
 inference = JumpRopeInference()
 
 with gr.Blocks() as app:
@@ -43,23 +44,71 @@ with gr.Blocks() as app:
         vlm_status = gr.Textbox(label="Analysis Status", interactive=False)
         vlm_report = gr.Markdown(label="Analysis Report")
 
+    def _extract_pose_to_csv(video_path: str, csv_path: str, target_size=(1080, 1920)):
+        cap = cv2.VideoCapture(video_path)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        all_data = []
+        fid = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame = cv2.resize(frame, target_size, interpolation=cv2.INTER_LINEAR)
+            result = pose_processor.process(frame, target_size=target_size)
+            kpts = result.get("keypoints_array", {})
+            xy, conf = kpts.get("xy"), kpts.get("conf")
+            if xy is not None and conf is not None:
+                row = [float(fid), 0.0]
+                for i in range(17):
+                    row.extend([float(xy[i, 0]), float(xy[i, 1]), float(conf[i])])
+                all_data.append(row)
+            fid += 1
+            yield fid / max(total, 1)
+        cap.release()
+        df = pd.DataFrame(all_data, columns=CSV_COLUMNS) if all_data else pd.DataFrame(columns=CSV_COLUMNS)
+        os.makedirs(os.path.dirname(csv_path) or '.', exist_ok=True)
+        df.to_csv(csv_path, index=False)
+
+    def _render_skeleton_video(csv_path: str, video_path: str, width=1080, height=1920, fps=30.0):
+        df = pd.read_csv(csv_path)
+        x_cols = [f"{n}_x" for n in KPT_NAMES]
+        y_cols = [f"{n}_y" for n in KPT_NAMES]
+        c_cols = [f"{n}_conf" for n in KPT_NAMES]
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
+        frame_ids = sorted(df['frame_id'].unique())
+        total = len(frame_ids)
+        for idx, fid in enumerate(frame_ids):
+            canvas = np.zeros((height, width, 3), dtype=np.uint8)
+            rows = df[df['frame_id'] == fid]
+            if not rows.empty:
+                row = rows.iloc[0]
+                xs = np.nan_to_num(row[x_cols].values, nan=0.0)
+                ys = np.nan_to_num(row[y_cols].values, nan=0.0)
+                confs = np.nan_to_num(row[c_cols].values, nan=0.0)
+                xy = np.stack([xs, ys], axis=1)
+                PoseProcessor.render_skeleton(canvas, xy, confs)
+            writer.write(canvas)
+            yield (idx + 1) / max(total, 1)
+        writer.release()
+
     def process_video(video, progress=gr.Progress()):
         if video is None:
             raise gr.Error("Please upload a video file first")
         output_csv = f"output/pose_data_{uuid.uuid4()}.csv"
-        for i in extractor.extract_pose(video, output_csv):
-            progress(i/2)
+        for p in _extract_pose_to_csv(video, output_csv):
+            progress(p / 2)
         output_video = f"output/skeleton_video_{uuid.uuid4()}.mp4"
-        for i in visualize_pose(output_csv, output_video):
-            progress(0.5 +i/2)
-        yield output_csv,output_video
+        for p in _render_skeleton_video(output_csv, output_video):
+            progress(0.5 + p / 2)
+        yield output_csv, output_video
 
     def process_csv(csv, progress=gr.Progress()):
         if csv is None:
             raise gr.Error("Please upload a CSV file first")
         output_video = f"output/skeleton_video_{uuid.uuid4()}.mp4"
-        for i in visualize_pose(csv, output_video):
-            progress(i)
+        for p in _render_skeleton_video(csv, output_video):
+            progress(p)
         yield output_video
 
     convert_button.click(

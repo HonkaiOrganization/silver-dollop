@@ -1,6 +1,6 @@
 ---
 name: pyside6-analysis-page
-description: PySide6 Analysis Page Architecture: QStackedWidget page switching + QThread async inference/VLM + matplotlib chart embedding + VideoPlayer card-style VLM report (with B64 video embedding), native PySide style
+description: PySide6 Analysis Page Architecture: QStackedWidget page switching + QThread async inference/VLM + matplotlib chart embedding + mosaic keyframe image cards (no video player), native PySide style
 source: auto-skill
 extracted_at: '2026-07-04T12:00:00.000Z'
 ---
@@ -15,9 +15,10 @@ Applies to the analysis phase in the "Record -> Playback -> Submit Analysis" pip
 gui/
 ├── analysis_page.py          # AnalysisPage main class (page layout + logic)
 ├── widgets/
-│   ├── __init__.py           # Exports VideoPlayer, SectionCard
-│   ├── video_player.py       # VideoPlayer embedded video player
-│   └── section_card.py       # SectionCard VLM analysis card
+│   ├── __init__.py           # Exports SectionCard, FrameDisplay, VideoDisplay, SkeletonDisplay
+│   ├── frame_display.py      # FrameDisplay base widget (BGR→QPixmap + resize)
+│   ├── video_display.py      # VideoDisplay + SkeletonDisplay subclasses
+│   └── section_card.py       # SectionCard VLM analysis card (mosaic images)
 └── workers/
     ├── __init__.py           # Exports InferenceWorker, VLMWorker
     ├── inference_worker.py   # Inference background thread
@@ -31,7 +32,7 @@ MainWindow (QStackedWidget)
 ├── _main_page  (Record/Playback view)
 └── _analysis_page  (AnalysisPage widget)
      ├── QThread: InferenceWorker -> Inference -> Charts + Statistics
-     └── QThread: VLMWorker -> VLM Analysis -> SectionCard list (with VideoPlayer)
+     └── QThread: VLMWorker -> VLM Analysis -> SectionCard list (with mosaic keyframe images)
 ```
 
 ## MainWindow Integration
@@ -185,46 +186,71 @@ def _plot_chart(self, r: dict):
     self._chart_layout.addWidget(canvas)
 ```
 
-## VideoPlayer Component
+## Mosaic Keyframe Display (replaces VideoPlayer)
 
-An embedded player based on `QMediaPlayer` + `QVideoWidget`, supporting play/pause/progress bar. Video data is decoded from base64 and written to a temporary MP4 file:
+Instead of embedding a video player, extract keyframes from the base64 clip and display them as a grid mosaic image. This is simpler, avoids QMediaPlayer complexity, and matches the Word export visual style.
 
 ```python
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtCore import QUrl
-import base64, tempfile, os
+import cv2, numpy as np, base64, os, uuid
+from PySide6.QtGui import QImage, QPixmap
 
-class VideoPlayer(QWidget):
-    def __init__(self, clip_b64: str, parent=None):
-        super().__init__(parent)
-        self._tmp_file: str | None = None
-        self._setup_ui()
-        self._load_clip(clip_b64)
+def _extract_keyframes(clip_b64: str, max_frames: int = 8) -> list[np.ndarray]:
+    """base64 -> temp MP4 -> cv2.VideoCapture -> uniform frame sampling"""
+    data = base64.b64decode(clip_b64)
+    tmp_path = os.path.join(TEMP_DIR, f"clip_{uuid.uuid4().hex[:8]}.mp4")
+    try:
+        with open(tmp_path, 'wb') as f:
+            f.write(data)
+        cap = cv2.VideoCapture(tmp_path)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        step = max(1, total // max_frames)
+        frames = []
+        for idx in range(0, total, step)[:max_frames]:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if ret:
+                frames.append(frame)
+        cap.release()
+        return frames
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
-    def _load_clip(self, clip_b64: str):
-        data = base64.b64decode(clip_b64)
-        fd, path = tempfile.mkstemp(suffix='.mp4', dir=TEMP_DIR)
-        os.write(fd, data)
-        os.close(fd)
-        self._tmp_file = path
-        self._player.setSource(QUrl.fromLocalFile(path))
+def _create_mosaic(frames: list[np.ndarray], cols: int = 4, target_width: int = 960) -> np.ndarray | None:
+    """Compose frames into a grid mosaic."""
+    if not frames:
+        return None
+    rows = (len(frames) + cols - 1) // cols
+    h, w = frames[0].shape[:2]
+    cell_w = target_width // cols
+    cell_h = int(h * cell_w / w)
+    canvas = np.zeros((cell_h * rows, cell_w * cols, 3), dtype=np.uint8)
+    for i, frame in enumerate(frames):
+        r, c = divmod(i, cols)
+        resized = cv2.resize(frame, (cell_w, cell_h), interpolation=cv2.INTER_AREA)
+        canvas[r*cell_h:(r+1)*cell_h, c*cell_w:(c+1)*cell_w] = resized
+    return canvas
 
-    def cleanup(self):
-        self._player.stop()
-        if self._tmp_file and os.path.exists(self._tmp_file):
-            os.unlink(self._tmp_file)
+def _bgr_to_pixmap(bgr: np.ndarray) -> QPixmap:
+    arr = np.ascontiguousarray(bgr)
+    h, w, ch = arr.shape
+    qimg = QImage(arr.data, w, h, ch * w, QImage.Format.Format_BGR888).copy()
+    return QPixmap.fromImage(qimg)
 ```
 
-**Key Implementation Details**:
-- Use `QUrl.fromLocalFile()` to load local temporary files (QMediaPlayer does not support playing MP4 directly from an in-memory buffer)
-- `QAudioOutput` needs `setMuted(True)` to mute (VLM analysis videos have no audio)
-- The progress bar uses the `sliderMoved` signal for drag-to-seek, and `positionChanged`/`durationChanged` to update progress
-- `cleanup()` must delete the temporary file, otherwise TEMP_DIR will accumulate files
+Display in QLabel:
+```python
+mosaic = _create_mosaic(frames, cols=4, target_width=960)
+if mosaic is not None:
+    mosaic_label = QLabel()
+    pixmap = _bgr_to_pixmap(mosaic)
+    mosaic_label.setPixmap(pixmap.scaled(960, 600, Qt.AspectRatioMode.KeepAspectRatio, ...))
+    layout.addWidget(mosaic_label)
+```
 
 ## SectionCard Component
 
-Each VLM analysis segment is rendered as an independent card, containing: title + anomaly probability label + progress bar + VideoPlayer + Markdown analysis text. Uses native `QFrame.StyledPanel` style:
+Each VLM analysis segment is rendered as an independent card, containing: title + anomaly probability label + progress bar + mosaic keyframe image + Markdown analysis text. Uses native `QFrame.StyledPanel` style:
 
 ```python
 class SectionCard(QFrame):

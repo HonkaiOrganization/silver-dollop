@@ -33,9 +33,6 @@ class PlaybackThread(QThread):
         self._seek_to = -1
         self._playing = False
 
-    # ------------------------------------------------------------------
-    # Control interface
-    # ------------------------------------------------------------------
     def play(self):
         self._paused = False
         self._playing = True
@@ -54,9 +51,6 @@ class PlaybackThread(QThread):
     def is_playing(self) -> bool:
         return self._playing and not self._paused
 
-    # ------------------------------------------------------------------
-    # Thread main loop
-    # ------------------------------------------------------------------
     def run(self):
         self._is_running = True
 
@@ -110,14 +104,7 @@ class PlaybackThread(QThread):
 
         cap.release()
 
-    # ------------------------------------------------------------------
-    # Internal methods
-    # ------------------------------------------------------------------
     def _build_frame_index(self, df: pd.DataFrame, total_frames: int) -> list[tuple[Optional[np.ndarray], Optional[np.ndarray]]]:
-        """
-        Build a list from DataFrame grouped by frame_id, each element is (xy, conf) or (None, None).
-        xy: [17, 2] np.ndarray, conf: [17] np.ndarray
-        """
         x_cols = [f"{n}_x" for n in KPT_NAMES]
         y_cols = [f"{n}_y" for n in KPT_NAMES]
         c_cols = [f"{n}_conf" for n in KPT_NAMES]

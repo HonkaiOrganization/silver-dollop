@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from utils.load_csv import load_and_normalize_csv
-from models.model import JumpRopeClassifier
+from models.model import Classifier
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class JumpRopeInference:
         export_data = torch.load(model_path, map_location=self.device, weights_only=True)
         model_cfg = export_data['config']
 
-        self.model = JumpRopeClassifier(
+        self.model = Classifier(
             in_channels=model_cfg['in_channels'],
             num_classes=model_cfg['num_classes']
         ).to(self.device)

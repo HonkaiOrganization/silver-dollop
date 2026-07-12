@@ -1,1 +1,1 @@
-from .classifier import JumpRopeClassifier
+from .classifier import Classifier

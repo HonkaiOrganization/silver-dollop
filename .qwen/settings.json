@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Agent(Explore)"
+      "Agent(Explore)",
+      "Bash(move *)",
+      "Bash(rmdir *)",
+      "Bash(del *)",
+      "Bash(python *)"
     ]
   },
   "$version": 4

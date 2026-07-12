@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class JumpRopeClassifier(nn.Module):
+class Classifier(nn.Module):
     def __init__(self, in_channels=34, num_classes=2):
         super().__init__()
         self.features = nn.Sequential(
